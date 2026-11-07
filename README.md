@@ -10,8 +10,7 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
   <img src="screenshots/music.png" width="200" alt="iOS 15 music player with large artwork, app icon, AirPlay button and volume slider">
 </p>
 
-> [!NOTE]
-> iPhones with a Dynamic Island (14 Pro and newer) are not supported yet.
+> Dynamic Island support is device-dependent; the current lock glyph placement has been adjusted for Dynamic Island layouts, but models and iOS versions still need individual testing.
 
 ## What it changes
 
@@ -72,12 +71,7 @@ To add one by hand, put `Light.heic` and `Dark.heic` (plus `Light.mov` and `Dark
 
 ## Compatibility
 
-Rootless jailbreaks on **iOS 16**. Tested with Dopamine on:
-
-- iPhone 13 Pro (iOS 16.1.1) and iPhone 12 Pro (iOS 16.5)
-- by users: iPhone X (iOS 16.7), iPhone 11 (iOS 16.1), iPhone 8 Plus (iOS 16.2)
-
-Other iPhones without a Dynamic Island get sizes and positions for their screen but are untested. If you try one, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right.
+The tweak targets iOS 16 and later and has RootHide and rootless package builds. It is intended for iPhone lock screens; behavior can differ by device and iOS version. The current Dynamic Island lock-glyph adjustment was reported fixed by a user on an iPhone 15 Pro Max running iOS 17.1.1, but that is not a substitute for testing each feature and device.
 
 ## Installation
 
@@ -93,7 +87,7 @@ If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak
 
 ## Known limitations
 
-- No Dynamic Island support: the tweak installs there, but nothing is adjusted for it.
+- Device-specific positioning can vary, especially on Dynamic Island models; validate the Lock Screen on each target device and iOS release.
 - Landscape on Plus models is new; the direction of Perspective Zoom and of the bubbles' motion is untested there.
 - On iPhones with a home button, the dock can briefly show iOS's own wallpaper while the home screen rotates; it is right again once the turn is done.
 - Live wallpapers play through the tweak's own player, not iOS 15's.
@@ -104,16 +98,11 @@ If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak
 
 ## Building
 
-You need [Theos](https://theos.dev) and the iOS 16.5 SDK.
+In Apelin, build this workspace with its external `build.sh` script. Build RootHide and rootless separately; RootHide produces an `iphoneos-arm64e` package and rootless produces a universal `iphoneos-arm64` package with arm64 and arm64e slices. Apelin provides the prepared toolchain, SDK and injection-framework stubs used by the script.
 
-```bash
-git clone https://github.com/aronsz26/LockScreenRestore.git
-cd LockScreenRestore
-export THEOS=~/theos
-make package FINALPACKAGE=1
-```
+The resulting `.deb` is a build artifact managed by Apelin and is not checked into this source repository. Use the project's **Distribute…** action to export a package for the selected bootstrap.
 
-`Tweak.xm` is the lock screen, `LSRWallpaperPane.xm` the Settings → Wallpaper page and `lockscreenrestoreprefs/` the tweak's settings. Without `FINALPACKAGE=1`, `DebugTools.m` is built in too: it inspects the running processes over SSH (see the comment at its top).
+The packaged Objective-C sources are `Tweak.m`, `LSRWallpaperPane.m` and `DebugTools.m`; `lockscreenrestoreprefs/` contains the Settings pane. The legacy Theos Makefiles and `.xm` source are not used by the Apelin builder.
 
 ## How it works
 
