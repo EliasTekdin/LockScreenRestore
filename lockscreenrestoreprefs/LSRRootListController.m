@@ -1,5 +1,4 @@
 #import <Preferences/PSListController.h>
-#import <Preferences/PSSpecifier.h>
 #import <sys/sysctl.h>
 
 @interface FBSSystemService : NSObject

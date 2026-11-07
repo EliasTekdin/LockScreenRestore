@@ -15,6 +15,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <CoreText/CoreText.h>
+#import <os/log.h>
+#import <substrate.h>
 #import <dlfcn.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMotion/CoreMotion.h>
@@ -288,18 +290,14 @@ static UIView *LSRFindSubview(UIView *root, Class cls) {
 
 #pragma mark - Group: iOS 15 clock (padlock, time, date, colors, no depth effect)
 
-%group LSRClock
-
-%hook SBFLockScreenDateView
-- (void)layoutSubviews {
-    // Only set when it differs: setting it schedules another layout pass, and doing it
-    // unconditionally froze SpringBoard in an endless layout loop.
-    if (fabs(self.customTimeFont.pointSize - LSRCurrentLayout().clockFontSize) > 0.5) {
-        [self setCustomTimeFont:LSRClockFont()];
+static void LSRClock_SBFLockScreenDateView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_SBFLockScreenDateView_layoutSubviews;
+static void LSRClock_SBFLockScreenDateView_layoutSubviews(id self, SEL _cmd) {
+    if (fabs(((SBFLockScreenDateView *)self).customTimeFont.pointSize - LSRCurrentLayout().clockFontSize) > 0.5) {
+        [(SBFLockScreenDateView *)self setCustomTimeFont:LSRClockFont()];
     }
-    %orig;
+    ((void (*)(id, SEL))LSRClock_orig_SBFLockScreenDateView_layoutSubviews)(self, _cmd);
 }
-%end
 
 #pragma mark - Time and date positions
 //
@@ -362,36 +360,38 @@ static CGPoint LSRAdjustedCenter(UIView *view, BOOL isTime, CGPoint center) {
     return center;
 }
 
-%hook CSProminentTimeView
-// Covers a label that already had its font before being added here (the setFont: hook below
-// only applies once the label is inside this view). Only assign when different.
-- (void)layoutSubviews {
-    %orig;
-    UILabel *label = self.textLabel;
+static void LSRClock_CSProminentTimeView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentTimeView_layoutSubviews;
+static void LSRClock_CSProminentTimeView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSProminentTimeView_layoutSubviews)(self, _cmd);
+    UILabel *label = ((CSProminentTimeView *)self).textLabel;
     UIFont *font = LSRClockFont();
     if (label && ![label.font isEqual:font]) label.font = font;
 }
 
-- (void)setFrame:(CGRect)frame {
+static void LSRClock_CSProminentTimeView_setFrame(id self, SEL _cmd, CGRect frame);
+static IMP LSRClock_orig_CSProminentTimeView_setFrame;
+static void LSRClock_CSProminentTimeView_setFrame(id self, SEL _cmd, CGRect frame) {
     if (sLSRApplying) {
-        %orig;
+        ((void (*)(id, SEL, CGRect))LSRClock_orig_CSProminentTimeView_setFrame)(self, _cmd, frame);
         return;
     }
     sLSRApplying = YES;
-    %orig(LSRAdjustedFrame(self, YES, frame));
+    ((void (*)(id, SEL, CGRect))LSRClock_orig_CSProminentTimeView_setFrame)(self, _cmd, LSRAdjustedFrame((UIView *)self, YES, frame));
     sLSRApplying = NO;
 }
 
-- (void)setCenter:(CGPoint)center {
+static void LSRClock_CSProminentTimeView_setCenter(id self, SEL _cmd, CGPoint center);
+static IMP LSRClock_orig_CSProminentTimeView_setCenter;
+static void LSRClock_CSProminentTimeView_setCenter(id self, SEL _cmd, CGPoint center) {
     if (sLSRApplying) {
-        %orig;
+        ((void (*)(id, SEL, CGPoint))LSRClock_orig_CSProminentTimeView_setCenter)(self, _cmd, center);
         return;
     }
     sLSRApplying = YES;
-    %orig(LSRAdjustedCenter(self, YES, center));
+    ((void (*)(id, SEL, CGPoint))LSRClock_orig_CSProminentTimeView_setCenter)(self, _cmd, LSRAdjustedCenter((UIView *)self, YES, center));
     sLSRApplying = NO;
 }
-%end
 
 #pragma mark - Date text: "Sunday, September 27", regular weight
 
@@ -431,93 +431,102 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
     return [LSRLongDateFormatter() stringFromDate:dateView.date ?: [NSDate date]];
 }
 
-%hook _UIAnimatingLabel
-- (void)setText:(NSString *)text {
-    %orig(LSRIOS15DateTextForLabel(self, text));
+static void LSRClock_UIAnimatingLabel_setText(id self, SEL _cmd, NSString *text);
+static IMP LSRClock_orig_UIAnimatingLabel_setText;
+static void LSRClock_UIAnimatingLabel_setText(id self, SEL _cmd, NSString *text) {
+    ((void (*)(id, SEL, id))LSRClock_orig_UIAnimatingLabel_setText)(self, _cmd, LSRIOS15DateTextForLabel((UILabel *)self, text));
 }
 
-// The time and date labels get iOS 16's fonts assigned directly (customTimeFont doesn't reach them).
-- (void)setFont:(UIFont *)font {
-    if ([self.superview isKindOfClass:NSClassFromString(@"CSProminentTimeView")]) font = LSRClockFont();
-    else if ([self.superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) font = LSRDateFont();
-    %orig(font);
+static void LSRClock_UIAnimatingLabel_setFont(id self, SEL _cmd, UIFont *font);
+static IMP LSRClock_orig_UIAnimatingLabel_setFont;
+static void LSRClock_UIAnimatingLabel_setFont(id self, SEL _cmd, UIFont *font) {
+    if ([((UILabel *)self).superview isKindOfClass:NSClassFromString(@"CSProminentTimeView")]) font = LSRClockFont();
+    else if ([((UILabel *)self).superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) font = LSRDateFont();
+    ((void (*)(id, SEL, id))LSRClock_orig_UIAnimatingLabel_setFont)(self, _cmd, font);
 }
 
-// The attributed text carries its own font, which wins over the label's: give the date iOS 15's.
-- (void)setAttributedText:(NSAttributedString *)attributedText {
-    if (attributedText.length && [self.superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) {
+static void LSRClock_UIAnimatingLabel_setAttributedText(id self, SEL _cmd, NSAttributedString *attributedText);
+static IMP LSRClock_orig_UIAnimatingLabel_setAttributedText;
+static void LSRClock_UIAnimatingLabel_setAttributedText(id self, SEL _cmd, NSAttributedString *attributedText) {
+    if (attributedText.length && [((UILabel *)self).superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) {
         NSMutableDictionary *attributes = [[attributedText attributesAtIndex:0 effectiveRange:NULL] mutableCopy];
         attributes[NSFontAttributeName] = LSRDateFont();
-        attributedText = [[NSAttributedString alloc] initWithString:LSRIOS15DateTextForLabel(self, attributedText.string)
+        attributedText = [[NSAttributedString alloc] initWithString:LSRIOS15DateTextForLabel((UILabel *)self, attributedText.string)
             attributes:attributes];
     }
-    %orig(attributedText);
+    ((void (*)(id, SEL, id))LSRClock_orig_UIAnimatingLabel_setAttributedText)(self, _cmd, attributedText);
 }
-%end
 
-%hook CSProminentSubtitleDateView
-- (void)setFrame:(CGRect)frame {
+static void LSRClock_CSProminentSubtitleDateView_setFrame(id self, SEL _cmd, CGRect frame);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_setFrame;
+static void LSRClock_CSProminentSubtitleDateView_setFrame(id self, SEL _cmd, CGRect frame) {
     if (sLSRApplying) {
-        %orig;
+        ((void (*)(id, SEL, CGRect))LSRClock_orig_CSProminentSubtitleDateView_setFrame)(self, _cmd, frame);
         return;
     }
     sLSRApplying = YES;
-    %orig(LSRAdjustedFrame(self, NO, frame));
+    ((void (*)(id, SEL, CGRect))LSRClock_orig_CSProminentSubtitleDateView_setFrame)(self, _cmd, LSRAdjustedFrame((UIView *)self, NO, frame));
     sLSRApplying = NO;
 }
 
-- (void)setCenter:(CGPoint)center {
+static void LSRClock_CSProminentSubtitleDateView_setCenter(id self, SEL _cmd, CGPoint center);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_setCenter;
+static void LSRClock_CSProminentSubtitleDateView_setCenter(id self, SEL _cmd, CGPoint center) {
     if (sLSRApplying) {
-        %orig;
+        ((void (*)(id, SEL, CGPoint))LSRClock_orig_CSProminentSubtitleDateView_setCenter)(self, _cmd, center);
         return;
     }
     sLSRApplying = YES;
-    %orig(LSRAdjustedCenter(self, NO, center));
+    ((void (*)(id, SEL, CGPoint))LSRClock_orig_CSProminentSubtitleDateView_setCenter)(self, _cmd, LSRAdjustedCenter((UIView *)self, NO, center));
     sLSRApplying = NO;
 }
 
-- (void)setDate:(NSDate *)date {
-    %orig;
-    LSRApplyIOS15Date(self);
+static void LSRClock_CSProminentSubtitleDateView_setDate(id self, SEL _cmd, NSDate *date);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_setDate;
+static void LSRClock_CSProminentSubtitleDateView_setDate(id self, SEL _cmd, NSDate *date) {
+    ((void (*)(id, SEL, id))LSRClock_orig_CSProminentSubtitleDateView_setDate)(self, _cmd, date);
+    LSRApplyIOS15Date((CSProminentSubtitleDateView *)self);
 }
 
-- (void)_updateLabel {
-    %orig;
-    LSRApplyIOS15Date(self);
+static void LSRClock_CSProminentSubtitleDateView_updateLabel(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_updateLabel;
+static void LSRClock_CSProminentSubtitleDateView_updateLabel(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSProminentSubtitleDateView_updateLabel)(self, _cmd);
+    LSRApplyIOS15Date((CSProminentSubtitleDateView *)self);
 }
 
-- (void)layoutSubviews {
-    %orig;
-    LSRApplyIOS15Date(self);
+static void LSRClock_CSProminentSubtitleDateView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_layoutSubviews;
+static void LSRClock_CSProminentSubtitleDateView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSProminentSubtitleDateView_layoutSubviews)(self, _cmd);
+    LSRApplyIOS15Date((CSProminentSubtitleDateView *)self);
 }
 
-- (void)didMoveToWindow {
-    %orig;
-    LSRApplyIOS15Date(self);
+static void LSRClock_CSProminentSubtitleDateView_didMoveToWindow(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentSubtitleDateView_didMoveToWindow;
+static void LSRClock_CSProminentSubtitleDateView_didMoveToWindow(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSProminentSubtitleDateView_didMoveToWindow)(self, _cmd);
+    LSRApplyIOS15Date((CSProminentSubtitleDateView *)self);
 }
-%end
 
 #pragma mark - Solid white time/date (no vibrancy tint)
 //
 // iOS 16 draws the time/date through a BSUIVibrancyEffectView (the labels themselves sit at
 // alpha 0 behind a vibrancy portal), which makes them tinted and slightly see-through.
 
-%hook CSProminentDisplayView
-- (void)layoutSubviews {
-    %orig;
-    sLSRDisplayView = self;
-    BSUIVibrancyEffectView *vibrancy = self.vibrancyEffectView;
+static void LSRClock_CSProminentDisplayView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentDisplayView_layoutSubviews;
+static void LSRClock_CSProminentDisplayView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSProminentDisplayView_layoutSubviews)(self, _cmd);
+    CSProminentDisplayView *display = (CSProminentDisplayView *)self;
+    sLSRDisplayView = display;
+    BSUIVibrancyEffectView *vibrancy = display.vibrancyEffectView;
     if (vibrancy.isEnabled) vibrancy.isEnabled = NO;
-    // Frames set before the views were fully in the hierarchy couldn't be converted; place
-    // them again now that they are.
-    LSRPlaceView(self.timeView, YES);
-    LSRPlaceView(LSRFindSubview(self, NSClassFromString(@"CSProminentSubtitleDateView")), NO);
-
-    // Temporary subtitles ("Swipe up to unlock", ...) cross-fade with the date in iOS 16; keep
-    // them on the date's line instead of above the clock, where they'd hit the padlock.
+    LSRPlaceView(display.timeView, YES);
+    LSRPlaceView(LSRFindSubview(display, NSClassFromString(@"CSProminentSubtitleDateView")), NO);
     CGFloat dateBaselineY = LSRCurrentLayout().dateBaselineY;
-    for (CSProminentTextElementView *subtitle in @[self.transientSubtitleView ?: [NSNull null],
-                                                   self.customSubtitleView ?: [NSNull null]]) {
+    for (CSProminentTextElementView *subtitle in @[display.transientSubtitleView ?: [NSNull null],
+                                                   display.customSubtitleView ?: [NSNull null]]) {
         if (![subtitle isKindOfClass:[UIView class]]) continue;
         CGFloat top;
         if (LSRTargetTopForBaseline(subtitle, dateBaselineY, subtitle.textLabel.font, subtitle.bounds.size.height, &top)) {
@@ -525,72 +534,87 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
         }
     }
 }
-%end
 
-%hook CSProminentDisplayViewController
-- (void)setTextColor:(UIColor *)color {
-    %orig([UIColor whiteColor]);
+static void LSRClock_CSProminentDisplayViewController_setTextColor(id self, SEL _cmd, UIColor *color);
+static IMP LSRClock_orig_CSProminentDisplayViewController_setTextColor;
+static void LSRClock_CSProminentDisplayViewController_setTextColor(id self, SEL _cmd, UIColor *color) {
+    ((void (*)(id, SEL, id))LSRClock_orig_CSProminentDisplayViewController_setTextColor)(self, _cmd, [UIColor whiteColor]);
 }
 
-- (UIColor *)effectiveTextColor {
+static UIColor *LSRClock_CSProminentDisplayViewController_effectiveTextColor(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProminentDisplayViewController_effectiveTextColor;
+static UIColor *LSRClock_CSProminentDisplayViewController_effectiveTextColor(id self, SEL _cmd) {
     return [UIColor whiteColor];
 }
-%end
 
-// iOS 15 started the list (Focus pill, music player, notifications) 29pt below the date's
-// baseline (SBFDashBoardViewMetrics listMinYForPage: = date baseline + dateBaselineToListY);
-// iOS 16 starts it under its own, higher clock. The list view covers the whole screen, so its
-// top inset is the start's height on screen.
-%hook CSCombinedListViewController
-- (UIEdgeInsets)_listViewDefaultContentInsets {
-    UIEdgeInsets insets = %orig;
+static UIEdgeInsets LSRClock_CSCombinedListViewController_listViewDefaultContentInsets(id self, SEL _cmd);
+static IMP LSRClock_orig_CSCombinedListViewController_listViewDefaultContentInsets;
+static UIEdgeInsets LSRClock_CSCombinedListViewController_listViewDefaultContentInsets(id self, SEL _cmd) {
+    UIEdgeInsets insets = ((UIEdgeInsets (*)(id, SEL))LSRClock_orig_CSCombinedListViewController_listViewDefaultContentInsets)(self, _cmd);
     if ([UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return insets;
     CGFloat listTop = round(LSRCurrentLayout().dateBaselineY + kIOS15DateBaselineToList);
     if (insets.top < listTop) insets.top = listTop;
     return insets;
 }
-%end
 
 #pragma mark - Big padlock that stays open after Face ID
 
-%hook SBUIProudLockIconView
-- (void)layoutSubviews {
-    %orig;
-    // The glyph is only centered by its parent, never re-framed, so a transform is safe.
-    UIView *glyph = LSRFindSubview(self, NSClassFromString(@"BSUICAPackageView"));
+static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_SBUIProudLockIconView_layoutSubviews;
+static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_SBUIProudLockIconView_layoutSubviews)(self, _cmd);
+    UIView *lockView = (UIView *)self;
+    UIView *glyph = LSRFindSubview(lockView, NSClassFromString(@"BSUICAPackageView"));
+    if (!glyph) return;
     LSRLayout layout = LSRCurrentLayout();
-    CGAffineTransform t = CGAffineTransformMake(layout.padlockScale, 0, 0, layout.padlockScale, 0, layout.padlockDrop);
-    if (glyph && !CGAffineTransformEqualToTransform(glyph.transform, t)) glyph.transform = t;
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    BOOL phone = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+    BOOL dynamicIslandFaceID = phone && MAX(screen.width, screen.height) >= 950.0 && MIN(screen.width, screen.height) >= 430.0;
+    CGFloat scale = dynamicIslandFaceID ? 1.0 : layout.padlockScale;
+    CGFloat tx = 0.0;
+    CGFloat ty = layout.padlockDrop;
+    if (dynamicIslandFaceID && glyph.superview && lockView.window) {
+        UIWindow *window = lockView.window;
+        CGPoint targetInWindow = CGPointMake(CGRectGetMidX(window.bounds), kIOS15FaceIDPadlockCenter);
+        CGPoint targetInSuperview = [glyph.superview convertPoint:targetInWindow fromView:window];
+        CGPoint delta = CGPointMake(targetInSuperview.x - glyph.center.x, targetInSuperview.y - glyph.center.y);
+        tx = delta.x;
+        ty = delta.y;
+    }
+    CGAffineTransform t = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
+    if (!CGAffineTransformEqualToTransform(glyph.transform, t)) glyph.transform = t;
 }
 
-// iOS 16 fades the padlock out and shrinks it (~0.7) after unlocking; iOS 15 kept it.
-- (void)setAlpha:(CGFloat)alpha {
-    %orig(1.0);
+static void LSRClock_SBUIProudLockIconView_setAlpha(id self, SEL _cmd, CGFloat alpha);
+static IMP LSRClock_orig_SBUIProudLockIconView_setAlpha;
+static void LSRClock_SBUIProudLockIconView_setAlpha(id self, SEL _cmd, CGFloat alpha) {
+    ((void (*)(id, SEL, CGFloat))LSRClock_orig_SBUIProudLockIconView_setAlpha)(self, _cmd, 1.0);
 }
 
-- (void)setTransform:(CGAffineTransform)transform {
-    %orig(CGAffineTransformIdentity);
+static void LSRClock_SBUIProudLockIconView_setTransform(id self, SEL _cmd, CGAffineTransform transform);
+static IMP LSRClock_orig_SBUIProudLockIconView_setTransform;
+static void LSRClock_SBUIProudLockIconView_setTransform(id self, SEL _cmd, CGAffineTransform transform) {
+    ((void (*)(id, SEL, CGAffineTransform))LSRClock_orig_SBUIProudLockIconView_setTransform)(self, _cmd, CGAffineTransformIdentity);
 }
-%end
 
-%hook CSProudLockViewController
-- (BOOL)_shouldApplyScaleAndBlurForAuthenticated {
+static BOOL LSRClock_CSProudLockViewController_shouldApplyScaleAndBlurForAuthenticated(id self, SEL _cmd);
+static IMP LSRClock_orig_CSProudLockViewController_shouldApplyScaleAndBlurForAuthenticated;
+static BOOL LSRClock_CSProudLockViewController_shouldApplyScaleAndBlurForAuthenticated(id self, SEL _cmd) {
     return NO;
 }
-%end
 
-// No depth effect: the wallpaper's cut-out foreground layer is drawn above the clock; iOS 15
-// had none.
-%hook PBUIPosterFloatingLayerReplica
-- (void)didMoveToWindow {
-    %orig;
-    self.hidden = YES;
+static void LSRClock_PBUIPosterFloatingLayerReplica_didMoveToWindow(id self, SEL _cmd);
+static IMP LSRClock_orig_PBUIPosterFloatingLayerReplica_didMoveToWindow;
+static void LSRClock_PBUIPosterFloatingLayerReplica_didMoveToWindow(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_PBUIPosterFloatingLayerReplica_didMoveToWindow)(self, _cmd);
+    ((UIView *)self).hidden = YES;
 }
 
-- (void)setHidden:(BOOL)hidden {
-    %orig(YES);
+static void LSRClock_PBUIPosterFloatingLayerReplica_setHidden(id self, SEL _cmd, BOOL hidden);
+static IMP LSRClock_orig_PBUIPosterFloatingLayerReplica_setHidden;
+static void LSRClock_PBUIPosterFloatingLayerReplica_setHidden(id self, SEL _cmd, BOOL hidden) {
+    ((void (*)(id, SEL, BOOL))LSRClock_orig_PBUIPosterFloatingLayerReplica_setHidden)(self, _cmd, YES);
 }
-%end
 
 #pragma mark - Charging battery in place of the clock
 //
@@ -637,39 +661,100 @@ static void LSRUpdateChargingShift(UIView *view) {
         NSStringFromCGRect(content), shift);
 }
 
-%hook CSBatteryChargingView
-- (void)didMoveToWindow {
-    %orig;
-    LSRUpdateChargingShift(self);
+static void LSRClock_CSBatteryChargingView_didMoveToWindow(id self, SEL _cmd);
+static IMP LSRClock_orig_CSBatteryChargingView_didMoveToWindow;
+static void LSRClock_CSBatteryChargingView_didMoveToWindow(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSBatteryChargingView_didMoveToWindow)(self, _cmd);
+    LSRUpdateChargingShift((UIView *)self);
 }
 
-- (void)setTransform:(CGAffineTransform)transform {
-    transform.ty += LSRChargingShift(self);
-    %orig(transform);
+static void LSRClock_CSBatteryChargingView_setTransform(id self, SEL _cmd, CGAffineTransform transform);
+static IMP LSRClock_orig_CSBatteryChargingView_setTransform;
+static void LSRClock_CSBatteryChargingView_setTransform(id self, SEL _cmd, CGAffineTransform transform) {
+    transform.ty += LSRChargingShift((UIView *)self);
+    ((void (*)(id, SEL, CGAffineTransform))LSRClock_orig_CSBatteryChargingView_setTransform)(self, _cmd, transform);
 }
 
-- (CGAffineTransform)transform {
-    CGAffineTransform t = %orig;
-    t.ty -= LSRChargingShift(self);
+static CGAffineTransform LSRClock_CSBatteryChargingView_transform(id self, SEL _cmd);
+static IMP LSRClock_orig_CSBatteryChargingView_transform;
+static CGAffineTransform LSRClock_CSBatteryChargingView_transform(id self, SEL _cmd) {
+    CGAffineTransform t = ((CGAffineTransform (*)(id, SEL))LSRClock_orig_CSBatteryChargingView_transform)(self, _cmd);
+    t.ty -= LSRChargingShift((UIView *)self);
     return t;
 }
-%end
 
-%hook _CSSingleBatteryChargingView
-- (void)layoutSubviews {
-    %orig;
-    LSRUpdateChargingShift(self);
+static void LSRClock_CSSingleBatteryChargingView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_CSSingleBatteryChargingView_layoutSubviews;
+static void LSRClock_CSSingleBatteryChargingView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSSingleBatteryChargingView_layoutSubviews)(self, _cmd);
+    LSRUpdateChargingShift((UIView *)self);
 }
-%end
 
-%hook _CSDoubleBatteryChargingView
-- (void)layoutSubviews {
-    %orig;
-    LSRUpdateChargingShift(self);
+static void LSRClock_CSDoubleBatteryChargingView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRClock_orig_CSDoubleBatteryChargingView_layoutSubviews;
+static void LSRClock_CSDoubleBatteryChargingView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRClock_orig_CSDoubleBatteryChargingView_layoutSubviews)(self, _cmd);
+    LSRUpdateChargingShift((UIView *)self);
 }
-%end
 
-%end // LSRClock
+static void LSRInstallClockHooks(void) {
+    Class cls = objc_getClass("SBFLockScreenDateView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_SBFLockScreenDateView_layoutSubviews, &LSRClock_orig_SBFLockScreenDateView_layoutSubviews);
+    cls = objc_getClass("CSProminentTimeView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_CSProminentTimeView_layoutSubviews, &LSRClock_orig_CSProminentTimeView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(setFrame:), (IMP)LSRClock_CSProminentTimeView_setFrame, &LSRClock_orig_CSProminentTimeView_setFrame);
+        MSHookMessageEx(cls, @selector(setCenter:), (IMP)LSRClock_CSProminentTimeView_setCenter, &LSRClock_orig_CSProminentTimeView_setCenter);
+    }
+    cls = objc_getClass("_UIAnimatingLabel");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(setText:), (IMP)LSRClock_UIAnimatingLabel_setText, &LSRClock_orig_UIAnimatingLabel_setText);
+        MSHookMessageEx(cls, @selector(setFont:), (IMP)LSRClock_UIAnimatingLabel_setFont, &LSRClock_orig_UIAnimatingLabel_setFont);
+        MSHookMessageEx(cls, @selector(setAttributedText:), (IMP)LSRClock_UIAnimatingLabel_setAttributedText, &LSRClock_orig_UIAnimatingLabel_setAttributedText);
+    }
+    cls = objc_getClass("CSProminentSubtitleDateView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(setFrame:), (IMP)LSRClock_CSProminentSubtitleDateView_setFrame, &LSRClock_orig_CSProminentSubtitleDateView_setFrame);
+        MSHookMessageEx(cls, @selector(setCenter:), (IMP)LSRClock_CSProminentSubtitleDateView_setCenter, &LSRClock_orig_CSProminentSubtitleDateView_setCenter);
+        MSHookMessageEx(cls, @selector(setDate:), (IMP)LSRClock_CSProminentSubtitleDateView_setDate, &LSRClock_orig_CSProminentSubtitleDateView_setDate);
+        MSHookMessageEx(cls, NSSelectorFromString(@"_updateLabel"), (IMP)LSRClock_CSProminentSubtitleDateView_updateLabel, &LSRClock_orig_CSProminentSubtitleDateView_updateLabel);
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_CSProminentSubtitleDateView_layoutSubviews, &LSRClock_orig_CSProminentSubtitleDateView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRClock_CSProminentSubtitleDateView_didMoveToWindow, &LSRClock_orig_CSProminentSubtitleDateView_didMoveToWindow);
+    }
+    cls = objc_getClass("CSProminentDisplayView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_CSProminentDisplayView_layoutSubviews, &LSRClock_orig_CSProminentDisplayView_layoutSubviews);
+    cls = objc_getClass("CSProminentDisplayViewController");
+    if (cls) {
+        MSHookMessageEx(cls, NSSelectorFromString(@"setTextColor:"), (IMP)LSRClock_CSProminentDisplayViewController_setTextColor, &LSRClock_orig_CSProminentDisplayViewController_setTextColor);
+        MSHookMessageEx(cls, NSSelectorFromString(@"effectiveTextColor"), (IMP)LSRClock_CSProminentDisplayViewController_effectiveTextColor, &LSRClock_orig_CSProminentDisplayViewController_effectiveTextColor);
+    }
+    cls = objc_getClass("CSCombinedListViewController");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"_listViewDefaultContentInsets"), (IMP)LSRClock_CSCombinedListViewController_listViewDefaultContentInsets, &LSRClock_orig_CSCombinedListViewController_listViewDefaultContentInsets);
+    cls = objc_getClass("SBUIProudLockIconView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_SBUIProudLockIconView_layoutSubviews, &LSRClock_orig_SBUIProudLockIconView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(setAlpha:), (IMP)LSRClock_SBUIProudLockIconView_setAlpha, &LSRClock_orig_SBUIProudLockIconView_setAlpha);
+        MSHookMessageEx(cls, @selector(setTransform:), (IMP)LSRClock_SBUIProudLockIconView_setTransform, &LSRClock_orig_SBUIProudLockIconView_setTransform);
+    }
+    cls = objc_getClass("CSProudLockViewController");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"_shouldApplyScaleAndBlurForAuthenticated"), (IMP)LSRClock_CSProudLockViewController_shouldApplyScaleAndBlurForAuthenticated, &LSRClock_orig_CSProudLockViewController_shouldApplyScaleAndBlurForAuthenticated);
+    cls = objc_getClass("PBUIPosterFloatingLayerReplica");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRClock_PBUIPosterFloatingLayerReplica_didMoveToWindow, &LSRClock_orig_PBUIPosterFloatingLayerReplica_didMoveToWindow);
+        MSHookMessageEx(cls, @selector(setHidden:), (IMP)LSRClock_PBUIPosterFloatingLayerReplica_setHidden, &LSRClock_orig_PBUIPosterFloatingLayerReplica_setHidden);
+    }
+    cls = objc_getClass("CSBatteryChargingView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRClock_CSBatteryChargingView_didMoveToWindow, &LSRClock_orig_CSBatteryChargingView_didMoveToWindow);
+        MSHookMessageEx(cls, @selector(setTransform:), (IMP)LSRClock_CSBatteryChargingView_setTransform, &LSRClock_orig_CSBatteryChargingView_setTransform);
+        MSHookMessageEx(cls, @selector(transform), (IMP)LSRClock_CSBatteryChargingView_transform, &LSRClock_orig_CSBatteryChargingView_transform);
+    }
+    cls = objc_getClass("_CSSingleBatteryChargingView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_CSSingleBatteryChargingView_layoutSubviews, &LSRClock_orig_CSSingleBatteryChargingView_layoutSubviews);
+    cls = objc_getClass("_CSDoubleBatteryChargingView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRClock_CSDoubleBatteryChargingView_layoutSubviews, &LSRClock_orig_CSDoubleBatteryChargingView_layoutSubviews);
+}
+
 
 #pragma mark - Group: iOS 15 focus pill
 //
@@ -702,65 +787,81 @@ static UIView *LSRFocusIndicator(UIView *focusView) {
     return [indicator isKindOfClass:[UIView class]] ? indicator : nil;
 }
 
-%group LSRFocus
-
-%hook CSFocusActivityView
-- (void)layoutSubviews {
-    %orig;
-    UIView *indicator = LSRFocusIndicator(self);
+// Ordinary Objective-C hooks for the focus group.
+static void LSRFocus_CSFocusActivityView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRFocus_orig_CSFocusActivityView_layoutSubviews;
+static void LSRFocus_CSFocusActivityView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRFocus_orig_CSFocusActivityView_layoutSubviews)(self, _cmd);
+    UIView *indicator = LSRFocusIndicator((UIView *)self);
     if (!indicator) return;
-    // %orig has just placed it; move it up and let it show outside the item.
     indicator.center = CGPointMake(indicator.center.x, indicator.center.y - kIOS15FocusPillLift);
     for (UIView *view = self; view && ![view isKindOfClass:[UIStackView class]]; view = view.superview) {
         if (view.clipsToBounds) view.clipsToBounds = NO;
     }
 }
 
-// Taps on the part of the pill above the item.
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    BOOL inside = %orig;
+static BOOL LSRFocus_CSFocusActivityView_pointInside(id self, SEL _cmd, CGPoint point, UIEvent *event);
+static IMP LSRFocus_orig_CSFocusActivityView_pointInside;
+static BOOL LSRFocus_CSFocusActivityView_pointInside(id self, SEL _cmd, CGPoint point, UIEvent *event) {
+    BOOL inside = ((BOOL (*)(id, SEL, CGPoint, id))LSRFocus_orig_CSFocusActivityView_pointInside)(self, _cmd, point, event);
     if (inside) return YES;
-    UIView *indicator = LSRFocusIndicator(self);
+    UIView *indicator = LSRFocusIndicator((UIView *)self);
     return indicator && CGRectContainsPoint(indicator.frame, point);
 }
-%end
 
-%hook CSAdjunctItemView
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    BOOL inside = %orig;
+static BOOL LSRFocus_CSAdjunctItemView_pointInside(id self, SEL _cmd, CGPoint point, UIEvent *event);
+static IMP LSRFocus_orig_CSAdjunctItemView_pointInside;
+static BOOL LSRFocus_CSAdjunctItemView_pointInside(id self, SEL _cmd, CGPoint point, UIEvent *event) {
+    BOOL inside = ((BOOL (*)(id, SEL, CGPoint, id))LSRFocus_orig_CSAdjunctItemView_pointInside)(self, _cmd, point, event);
     if (inside) return YES;
-    for (UIView *view in self.subviews) {
-        if ([view pointInside:[self convertPoint:point toView:view] withEvent:event]) return YES;
+    for (UIView *view in ((UIView *)self).subviews) {
+        if ([view pointInside:[((UIView *)self) convertPoint:point toView:view] withEvent:event]) return YES;
     }
     return NO;
 }
-%end
 
-%hook CSFocusActivityManager
-- (BOOL)_shouldHideFocusActivityIndicator {
+static BOOL LSRFocus_CSFocusActivityManager_shouldHideFocusActivityIndicator(id self, SEL _cmd) {
     return NO;
 }
-%end
 
-%hook NCNotificationListCountIndicatorView
-- (void)setTitleString:(NSString *)titleString {
-    %orig(nil);
+static void LSRFocus_NCNotificationListCountIndicatorView_setTitleString(id self, SEL _cmd, NSString *titleString);
+static IMP LSRFocus_orig_NCNotificationListCountIndicatorView_setTitleString;
+static void LSRFocus_NCNotificationListCountIndicatorView_setTitleString(id self, SEL _cmd, NSString *titleString) {
+    ((void (*)(id, SEL, id))LSRFocus_orig_NCNotificationListCountIndicatorView_setTitleString)(self, _cmd, nil);
 }
 
-- (void)setSymbolImageName:(NSString *)symbolImageName {
-    %orig(nil);
+static void LSRFocus_NCNotificationListCountIndicatorView_setSymbolImageName(id self, SEL _cmd, NSString *symbolImageName);
+static IMP LSRFocus_orig_NCNotificationListCountIndicatorView_setSymbolImageName;
+static void LSRFocus_NCNotificationListCountIndicatorView_setSymbolImageName(id self, SEL _cmd, NSString *symbolImageName) {
+    ((void (*)(id, SEL, id))LSRFocus_orig_NCNotificationListCountIndicatorView_setSymbolImageName)(self, _cmd, nil);
 }
 
-// Without a focus symbol iOS falls back to a "circlebadge.fill" dot; iOS 15 had no symbol here.
-- (void)layoutSubviews {
-    %orig;
+static void LSRFocus_NCNotificationListCountIndicatorView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRFocus_orig_NCNotificationListCountIndicatorView_layoutSubviews;
+static void LSRFocus_NCNotificationListCountIndicatorView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRFocus_orig_NCNotificationListCountIndicatorView_layoutSubviews)(self, _cmd);
     Ivar ivar = class_getInstanceVariable(object_getClass(self), "_symbolImageView");
     UIView *symbolView = ivar ? object_getIvar(self, ivar) : nil;
     if (symbolView && !symbolView.hidden) symbolView.hidden = YES;
 }
-%end
 
-%end // LSRFocus
+static void LSRInstallFocusHooks(void) {
+    Class cls = objc_getClass("CSFocusActivityView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRFocus_CSFocusActivityView_layoutSubviews, &LSRFocus_orig_CSFocusActivityView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(pointInside:withEvent:), (IMP)LSRFocus_CSFocusActivityView_pointInside, &LSRFocus_orig_CSFocusActivityView_pointInside);
+    }
+    cls = objc_getClass("CSAdjunctItemView");
+    if (cls) MSHookMessageEx(cls, @selector(pointInside:withEvent:), (IMP)LSRFocus_CSAdjunctItemView_pointInside, &LSRFocus_orig_CSAdjunctItemView_pointInside);
+    cls = objc_getClass("CSFocusActivityManager");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"_shouldHideFocusActivityIndicator"), (IMP)LSRFocus_CSFocusActivityManager_shouldHideFocusActivityIndicator, NULL);
+    cls = objc_getClass("NCNotificationListCountIndicatorView");
+    if (cls) {
+        MSHookMessageEx(cls, NSSelectorFromString(@"setTitleString:"), (IMP)LSRFocus_NCNotificationListCountIndicatorView_setTitleString, &LSRFocus_orig_NCNotificationListCountIndicatorView_setTitleString);
+        MSHookMessageEx(cls, NSSelectorFromString(@"setSymbolImageName:"), (IMP)LSRFocus_NCNotificationListCountIndicatorView_setSymbolImageName, &LSRFocus_orig_NCNotificationListCountIndicatorView_setSymbolImageName);
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRFocus_NCNotificationListCountIndicatorView_layoutSubviews, &LSRFocus_orig_NCNotificationListCountIndicatorView_layoutSubviews);
+    }
+}
 
 #pragma mark - Group: iOS 15 notifications (listed from the top)
 //
@@ -874,104 +975,87 @@ static void LSRHoldListAtTop(NCNotificationListView *list) {
 @interface CSCoverSheetView : UIView
 @end
 
-%group LSRNotifications
-
-// While search is open iOS 16 slides the content (list, Focus pill) about 100pt down and back up
-// when it closes; its list sits low enough for that to look intended. The clock stays put, and
-// on iOS 15 the content did too, so the downward slide is left out. Sideways offsets (camera,
-// widgets page) stay.
-%hook CSCoverSheetView
-- (void)setContentViewOffset:(CGPoint)offset scale:(CGFloat)scale {
+// Ordinary Objective-C hooks for notification layout and presentation.
+static void LSRNotifications_CSCoverSheetView_setContentViewOffset(id self, SEL _cmd, CGPoint offset, CGFloat scale);
+static IMP LSRNotifications_orig_CSCoverSheetView_setContentViewOffset;
+static void LSRNotifications_CSCoverSheetView_setContentViewOffset(id self, SEL _cmd, CGPoint offset, CGFloat scale) {
     if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone && offset.y > 0) offset.y = 0;
-    %orig(offset, scale);
-}
-%end
-
-%hook NCNotificationListView
-- (BOOL)layoutFromBottom {
-    return NO;
+    ((void (*)(id, SEL, CGPoint, CGFloat))LSRNotifications_orig_CSCoverSheetView_setContentViewOffset)(self, _cmd, offset, scale);
 }
 
-- (void)setLayoutFromBottom:(BOOL)layoutFromBottom {
-    %orig(NO);
+static BOOL LSRNotifications_NCNotificationListView_layoutFromBottom(id self, SEL _cmd) { return NO; }
+static void LSRNotifications_NCNotificationListView_setLayoutFromBottom(id self, SEL _cmd, BOOL value);
+static IMP LSRNotifications_orig_NCNotificationListView_setLayoutFromBottom;
+static void LSRNotifications_NCNotificationListView_setLayoutFromBottom(id self, SEL _cmd, BOOL value) {
+    ((void (*)(id, SEL, BOOL))LSRNotifications_orig_NCNotificationListView_setLayoutFromBottom)(self, _cmd, NO);
 }
-
-- (void)layoutSubviews {
-    %orig;
-    LSRApplyHistoryHeaderReveal(self);
-    LSRHoldListAtTop(self);
+static void LSRNotifications_NCNotificationListView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRNotifications_orig_NCNotificationListView_layoutSubviews;
+static void LSRNotifications_NCNotificationListView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRNotifications_orig_NCNotificationListView_layoutSubviews)(self, _cmd);
+    LSRApplyHistoryHeaderReveal((NCNotificationListView *)self);
+    LSRHoldListAtTop((NCNotificationListView *)self);
 }
-
-- (void)setContentOffset:(CGPoint)offset {
-    %orig;
-    LSRHoldListAtTop(self);
+static void LSRNotifications_NCNotificationListView_setContentOffset(id self, SEL _cmd, CGPoint offset);
+static IMP LSRNotifications_orig_NCNotificationListView_setContentOffset;
+static void LSRNotifications_NCNotificationListView_setContentOffset(id self, SEL _cmd, CGPoint offset) {
+    ((void (*)(id, SEL, CGPoint))LSRNotifications_orig_NCNotificationListView_setContentOffset)(self, _cmd, offset);
+    LSRHoldListAtTop((NCNotificationListView *)self);
 }
-
-- (void)setRevealPercentage:(CGFloat)percentage {
-    %orig;
-    LSRApplyHistoryHeaderReveal(self);
+static void LSRNotifications_NCNotificationListView_setRevealPercentage(id self, SEL _cmd, CGFloat percentage);
+static IMP LSRNotifications_orig_NCNotificationListView_setRevealPercentage;
+static void LSRNotifications_NCNotificationListView_setRevealPercentage(id self, SEL _cmd, CGFloat percentage) {
+    ((void (*)(id, SEL, CGFloat))LSRNotifications_orig_NCNotificationListView_setRevealPercentage)(self, _cmd, percentage);
+    LSRApplyHistoryHeaderReveal((NCNotificationListView *)self);
 }
-
-- (void)setRevealed:(BOOL)revealed {
-    %orig;
-    LSRApplyHistoryHeaderReveal(self);
+static void LSRNotifications_NCNotificationListView_setRevealed(id self, SEL _cmd, BOOL revealed);
+static IMP LSRNotifications_orig_NCNotificationListView_setRevealed;
+static void LSRNotifications_NCNotificationListView_setRevealed(id self, SEL _cmd, BOOL revealed) {
+    ((void (*)(id, SEL, BOOL))LSRNotifications_orig_NCNotificationListView_setRevealed)(self, _cmd, revealed);
+    LSRApplyHistoryHeaderReveal((NCNotificationListView *)self);
 }
-%end
-
-// iOS also sets the header's alpha itself (e.g. fading it in while unlocking, with the history
-// still closed); never let it rise above the reveal progress.
-%hook NCNotificationListSectionHeaderView
-- (void)setAlpha:(CGFloat)alpha {
-    %orig(MIN(alpha, LSRHistoryHeaderMaxAlpha(self)));
+static void LSRNotifications_NCNotificationListSectionHeaderView_setAlpha(id self, SEL _cmd, CGFloat alpha);
+static IMP LSRNotifications_orig_NCNotificationListSectionHeaderView_setAlpha;
+static void LSRNotifications_NCNotificationListSectionHeaderView_setAlpha(id self, SEL _cmd, CGFloat alpha) {
+    ((void (*)(id, SEL, CGFloat))LSRNotifications_orig_NCNotificationListSectionHeaderView_setAlpha)(self, _cmd, MIN(alpha, LSRHistoryHeaderMaxAlpha((UIView *)self)));
 }
-%end
-
-
-// Card shape, measured on Apple's iOS 15 lock screen: 18.5pt corners (iOS 16: 23.5), and every
-// inner inset 4pt tighter — icon 10pt from the edges (iOS 16: 14), date 13pt from the right
-// (17), one-line card 58pt tall (66). Instead of re-implementing iOS 16's layout, let it lay
-// out (and measure) for a size 8pt larger than the real one, then view it through a bounds
-// origin of (4,4) so everything shows 4pt up and left: every inset shrinks by exactly 4pt and
-// the measured height follows. (iOS lays out from (0,0) and ignores the bounds' origin; moving
-// the subviews themselves added up, since iOS doesn't re-place all of them every pass.)
-%hook NCNotificationSeamlessContentView
-- (void)_layoutSubviewInBounds:(CGRect)bounds measuringOnly:(CGSize *)measuredSize {
+static void LSRNotifications_NCNotificationSeamlessContentView_layoutSubviewInBounds(id self, SEL _cmd, CGRect bounds, CGSize *measuredSize);
+static IMP LSRNotifications_orig_NCNotificationSeamlessContentView_layoutSubviewInBounds;
+static void LSRNotifications_NCNotificationSeamlessContentView_layoutSubviewInBounds(id self, SEL _cmd, CGRect bounds, CGSize *measuredSize) {
     CGFloat reduction = kIOS15CardInsetReduction;
     CGRect enlarged = bounds;
     enlarged.size.width += 2.0 * reduction;
     enlarged.size.height += 2.0 * reduction;
-    %orig(enlarged, measuredSize);
+    ((void (*)(id, SEL, CGRect, CGSize *))LSRNotifications_orig_NCNotificationSeamlessContentView_layoutSubviewInBounds)(self, _cmd, enlarged, measuredSize);
     if (measuredSize) {
         measuredSize->width = MAX(0.0, measuredSize->width - 2.0 * reduction);
         measuredSize->height = MAX(0.0, measuredSize->height - 2.0 * reduction);
         return;
     }
-    CGRect viewBounds = self.bounds;
+    UIView *view = (UIView *)self;
+    CGRect viewBounds = view.bounds;
     if (!CGPointEqualToPoint(viewBounds.origin, CGPointMake(reduction, reduction))) {
         viewBounds.origin = CGPointMake(reduction, reduction);
-        self.bounds = viewBounds;
+        view.bounds = viewBounds;
     }
-    // iOS 16 top-aligns the icon with the title on taller cards; iOS 15 always centered it.
     CGFloat wantedCenterY = CGRectGetMidY(viewBounds);
-    for (UIView *subview in self.subviews) {
+    for (UIView *subview in view.subviews) {
         if (![NSStringFromClass([subview class]) containsString:@"BadgedIconView"]) continue;
         CGPoint center = subview.center;
         if (fabs(center.y - wantedCenterY) > 0.01) subview.center = CGPointMake(center.x, wantedCenterY);
     }
 }
-%end
-
-%hook NCNotificationShortLookView
-- (void)_setContinuousCornerRadius:(CGFloat)radius {
-    %orig(kIOS15CardCornerRadius);
+static void LSRNotifications_NCNotificationShortLookView_setContinuousCornerRadius(id self, SEL _cmd, CGFloat radius);
+static IMP LSRNotifications_orig_NCNotificationShortLookView_setContinuousCornerRadius;
+static void LSRNotifications_NCNotificationShortLookView_setContinuousCornerRadius(id self, SEL _cmd, CGFloat radius) {
+    ((void (*)(id, SEL, CGFloat))LSRNotifications_orig_NCNotificationShortLookView_setContinuousCornerRadius)(self, _cmd, kIOS15CardCornerRadius);
 }
-
-- (void)layoutSubviews {
-    %orig;
-    if (fabs(self._continuousCornerRadius - kIOS15CardCornerRadius) > 0.01) {
-        [self _setContinuousCornerRadius:kIOS15CardCornerRadius];
-    }
-    // The dimming layer on cards stacked behind another one keeps its own radius.
+static void LSRNotifications_NCNotificationShortLookView_layoutSubviews(id self, SEL _cmd);
+static IMP LSRNotifications_orig_NCNotificationShortLookView_layoutSubviews;
+static void LSRNotifications_NCNotificationShortLookView_layoutSubviews(id self, SEL _cmd) {
+    ((void (*)(id, SEL))LSRNotifications_orig_NCNotificationShortLookView_layoutSubviews)(self, _cmd);
+    NCNotificationShortLookView *view = (NCNotificationShortLookView *)self;
+    if (fabs(view._continuousCornerRadius - kIOS15CardCornerRadius) > 0.01) [view _setContinuousCornerRadius:kIOS15CardCornerRadius];
     Ivar ivar = class_getInstanceVariable(object_getClass(self), "_stackDimmingOverlayView");
     UIView *dimming = ivar ? object_getIvar(self, ivar) : nil;
     if (dimming && fabs(dimming.layer.cornerRadius - kIOS15CardCornerRadius) > 0.01) {
@@ -979,37 +1063,52 @@ static void LSRHoldListAtTop(NCNotificationListView *list) {
         dimming.layer.cornerCurve = kCACornerCurveContinuous;
     }
 }
-%end
-
-// iOS 15 only had the list. iOS 16's Settings > Notifications > Display As also offers Count
-// and Stack (0 = List there): always use the list while this is on. The user's choice stays
-// saved and applies again without the tweak.
-%hook NCNotificationMasterList
-- (void)setCurrentListDisplayStyleSetting:(NSUInteger)setting {
-    %orig(0);
+static void LSRNotifications_NCNotificationMasterList_setCurrentListDisplayStyleSetting(id self, SEL _cmd, NSUInteger setting);
+static IMP LSRNotifications_orig_NCNotificationMasterList_setCurrentListDisplayStyleSetting;
+static void LSRNotifications_NCNotificationMasterList_setCurrentListDisplayStyleSetting(id self, SEL _cmd, NSUInteger setting) {
+    ((void (*)(id, SEL, NSUInteger))LSRNotifications_orig_NCNotificationMasterList_setCurrentListDisplayStyleSetting)(self, _cmd, 0);
 }
-
-- (NSUInteger)currentListDisplayStyleSetting {
-    return 0;
-}
-
-// Pull to search: iOS 16 treats a downward drag that starts below the list's content as
-// scrolling the list (-[CSCoverSheetViewController spotlightPresenterAllowsPullToSearch:] needs
-// NO here). Its list starts low on the screen; ours starts under the date, so only the clock
-// was left for search. iOS 15 opened search from anywhere while the list rested at its top.
-- (BOOL)isScrollingListContent {
-    BOOL scrolling = %orig;
+static NSUInteger LSRNotifications_NCNotificationMasterList_currentListDisplayStyleSetting(id self, SEL _cmd) { return 0; }
+static BOOL LSRNotifications_NCNotificationMasterList_isScrollingListContent(id self, SEL _cmd);
+static IMP LSRNotifications_orig_NCNotificationMasterList_isScrollingListContent;
+static BOOL LSRNotifications_NCNotificationMasterList_isScrollingListContent(id self, SEL _cmd) {
+    BOOL scrolling = ((BOOL (*)(id, SEL))LSRNotifications_orig_NCNotificationMasterList_isScrollingListContent)(self, _cmd);
     if (!scrolling || [UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return scrolling;
-    NCNotificationListView *list = self.masterListView;
+    NCNotificationListView *list = ((NCNotificationMasterList *)self).masterListView;
     if (![list isKindOfClass:[UIScrollView class]]) return scrolling;
     if ([list.panGestureRecognizer velocityInView:list].y < 0) return scrolling;
-    // At its top or already pulled past it (the pull itself moves the offset below the top).
     if (list.contentOffset.y + list.adjustedContentInset.top > 1.0) return scrolling;
     return NO;
 }
-%end
 
-%end // LSRNotifications
+static void LSRInstallNotificationHooks(void) {
+    Class cls = objc_getClass("CSCoverSheetView");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"setContentViewOffset:scale:"), (IMP)LSRNotifications_CSCoverSheetView_setContentViewOffset, &LSRNotifications_orig_CSCoverSheetView_setContentViewOffset);
+    cls = objc_getClass("NCNotificationListView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutFromBottom), (IMP)LSRNotifications_NCNotificationListView_layoutFromBottom, NULL);
+        MSHookMessageEx(cls, @selector(setLayoutFromBottom:), (IMP)LSRNotifications_NCNotificationListView_setLayoutFromBottom, &LSRNotifications_orig_NCNotificationListView_setLayoutFromBottom);
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRNotifications_NCNotificationListView_layoutSubviews, &LSRNotifications_orig_NCNotificationListView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(setContentOffset:), (IMP)LSRNotifications_NCNotificationListView_setContentOffset, &LSRNotifications_orig_NCNotificationListView_setContentOffset);
+        MSHookMessageEx(cls, @selector(setRevealPercentage:), (IMP)LSRNotifications_NCNotificationListView_setRevealPercentage, &LSRNotifications_orig_NCNotificationListView_setRevealPercentage);
+        MSHookMessageEx(cls, @selector(setRevealed:), (IMP)LSRNotifications_NCNotificationListView_setRevealed, &LSRNotifications_orig_NCNotificationListView_setRevealed);
+    }
+    cls = objc_getClass("NCNotificationListSectionHeaderView");
+    if (cls) MSHookMessageEx(cls, @selector(setAlpha:), (IMP)LSRNotifications_NCNotificationListSectionHeaderView_setAlpha, &LSRNotifications_orig_NCNotificationListSectionHeaderView_setAlpha);
+    cls = objc_getClass("NCNotificationSeamlessContentView");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"_layoutSubviewInBounds:measuringOnly:"), (IMP)LSRNotifications_NCNotificationSeamlessContentView_layoutSubviewInBounds, &LSRNotifications_orig_NCNotificationSeamlessContentView_layoutSubviewInBounds);
+    cls = objc_getClass("NCNotificationShortLookView");
+    if (cls) {
+        MSHookMessageEx(cls, NSSelectorFromString(@"_setContinuousCornerRadius:"), (IMP)LSRNotifications_NCNotificationShortLookView_setContinuousCornerRadius, &LSRNotifications_orig_NCNotificationShortLookView_setContinuousCornerRadius);
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRNotifications_NCNotificationShortLookView_layoutSubviews, &LSRNotifications_orig_NCNotificationShortLookView_layoutSubviews);
+    }
+    cls = objc_getClass("NCNotificationMasterList");
+    if (cls) {
+        MSHookMessageEx(cls, NSSelectorFromString(@"setCurrentListDisplayStyleSetting:"), (IMP)LSRNotifications_NCNotificationMasterList_setCurrentListDisplayStyleSetting, &LSRNotifications_orig_NCNotificationMasterList_setCurrentListDisplayStyleSetting);
+        MSHookMessageEx(cls, NSSelectorFromString(@"currentListDisplayStyleSetting"), (IMP)LSRNotifications_NCNotificationMasterList_currentListDisplayStyleSetting, NULL);
+        MSHookMessageEx(cls, NSSelectorFromString(@"isScrollingListContent"), (IMP)LSRNotifications_NCNotificationMasterList_isScrollingListContent, &LSRNotifications_orig_NCNotificationMasterList_isScrollingListContent);
+    }
+}
 
 #pragma mark - Group: iOS 15 live wallpaper
 //
@@ -1792,33 +1891,32 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
 @interface PBUIBokehWallpaperCircle : CALayer
 @end
 
-%group LSRWallpaper
-
-%hook _SBWallpaperSecureWindow
-- (void)layoutSubviews {
-    %orig;
+// LSRWallpaper hooks are plain Objective-C; installed only when live wallpapers are enabled.
+static void (*LSRWallpaper_orig_SecureWindow_layoutSubviews)(id, SEL);
+static void LSRWallpaper_SecureWindow_layoutSubviews(id self, SEL _cmd) {
+    LSRWallpaper_orig_SecureWindow_layoutSubviews(self, _cmd);
     // Directly above iOS's wallpaper content (the window's first subview), below anything iOS
     // layers on top of it.
     LSRLiveWallpaperView *view = sLSRWallpaperView;
     if (!view || view.superview != self) {
-        view = [[LSRLiveWallpaperView alloc] initWithFrame:self.bounds];
+        view = [[LSRLiveWallpaperView alloc] initWithFrame:[(UIView *)self bounds]];
         sLSRWallpaperView = view;
     }
-    UIView *wallpaperContent = self.subviews.firstObject;
+    UIView *window = (UIView *)self;
+    UIView *wallpaperContent = window.subviews.firstObject;
     NSUInteger wantedIndex = wallpaperContent == view ? 0 : 1;
-    if (view.superview != self || [self.subviews indexOfObject:view] != wantedIndex) {
-        [self insertSubview:view aboveSubview:wallpaperContent];
+    if (view.superview != window || [window.subviews indexOfObject:view] != wantedIndex) {
+        [window insertSubview:view aboveSubview:wallpaperContent];
     }
-    if (!CGRectEqualToRect(view.frame, self.bounds)) view.frame = self.bounds;
-    LSRPlaceCaptureCopy(self);
+    if (!CGRectEqualToRect(view.frame, window.bounds)) view.frame = window.bounds;
+    LSRPlaceCaptureCopy((UIWindow *)self);
 }
-%end
 
 // Each display link tick moves the view's bubbles: give them iOS 15's dx and dy for it
 // (turned to the interface orientation by the view's own -_correctGyroValues:y:, and none
 // while the view rotates, as on iOS 15).
-%hook PBUIBokehWallpaperView
-- (void)_screenDidUpdate:(id)displayLink {
+static void (*LSRWallpaper_orig_BokehView_screenDidUpdate)(id, SEL, id);
+static void LSRWallpaper_BokehView_screenDidUpdate(id self, SEL _cmd, id displayLink) {
     LSRBokehMotionStart();
     sLSRBokehLastTick = CACurrentMediaTime();
     double dx = 0.0, dy = 0.0;
@@ -1839,113 +1937,142 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
     sLSRBokehDX = dx;
     sLSRBokehDY = dy;
     sLSRBokehUpdating = YES;
-    %orig;
+    LSRWallpaper_orig_BokehView_screenDidUpdate(self, _cmd, displayLink);
     sLSRBokehUpdating = NO;
 }
 
-- (void)_destroyDisplayLink {
-    %orig;
+static void (*LSRWallpaper_orig_BokehView_destroyDisplayLink)(id, SEL);
+static void LSRWallpaper_BokehView_destroyDisplayLink(id self, SEL _cmd) {
+    LSRWallpaper_orig_BokehView_destroyDisplayLink(self, _cmd);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         LSRBokehMotionPauseIfIdle();
     });
 }
-%end
 
-%hook PBUIBokehWallpaperCircle
-- (void)updatePositionWithTime:(double)time dx:(double)dx dy:(double)dy lockScreen:(BOOL)lockScreen {
+static void (*LSRWallpaper_orig_BokehCircle_updatePosition)(id, SEL, double, double, double, BOOL);
+static void LSRWallpaper_BokehCircle_updatePosition(id self, SEL _cmd, double time, double dx, double dy, BOOL lockScreen) {
     if (sLSRBokehUpdating) {
-        %orig(time, sLSRBokehDX, sLSRBokehDY, lockScreen);
+        LSRWallpaper_orig_BokehCircle_updatePosition(self, _cmd, time, sLSRBokehDX, sLSRBokehDY, lockScreen);
         return;
     }
-    %orig;
+    LSRWallpaper_orig_BokehCircle_updatePosition(self, _cmd, time, dx, dy, lockScreen);
 }
-%end
 
-%hook PBUIWallpaperView
-- (BOOL)_isParallaxMotionEnabled {
+static BOOL (*LSRWallpaper_orig_WallpaperView_isParallaxMotionEnabled)(id, SEL);
+static BOOL LSRWallpaper_WallpaperView_isParallaxMotionEnabled(id self, SEL _cmd) {
     if (sLSRBuildingStaticView || objc_getAssociatedObject(self, kLSRParallaxMotionKey)) return YES;
-    return %orig;
-}
-%end
-
-// A capture entering the wallpaper window, or a material there becoming one.
-%hook MTMaterialView
-- (void)didMoveToWindow {
-    %orig;
-    UIWindow *window = self.window;
-    if ([window isKindOfClass:%c(_SBWallpaperSecureWindow)] && LSRIsWallpaperCapture(self)) LSRPlaceCaptureCopy(window);
+    return LSRWallpaper_orig_WallpaperView_isParallaxMotionEnabled(self, _cmd);
 }
 
-- (void)setGroupName:(NSString *)name {
-    %orig;
-    UIWindow *window = self.window;
-    if ([window isKindOfClass:%c(_SBWallpaperSecureWindow)] && LSRIsWallpaperCapture(self)) LSRPlaceCaptureCopy(window);
+static void (*LSRWallpaper_orig_MaterialView_didMoveToWindow)(id, SEL);
+static void LSRWallpaper_MaterialView_didMoveToWindow(id self, SEL _cmd) {
+    LSRWallpaper_orig_MaterialView_didMoveToWindow(self, _cmd);
+    UIWindow *window = [(UIView *)self window];
+    if ([window isKindOfClass:objc_getClass("_SBWallpaperSecureWindow")] && LSRIsWallpaperCapture(self)) LSRPlaceCaptureCopy(window);
 }
-%end
+
+static void (*LSRWallpaper_orig_MaterialView_setGroupName)(id, SEL, NSString *);
+static void LSRWallpaper_MaterialView_setGroupName(id self, SEL _cmd, NSString *name) {
+    LSRWallpaper_orig_MaterialView_setGroupName(self, _cmd, name);
+    UIWindow *window = [(UIView *)self window];
+    if ([window isKindOfClass:objc_getClass("_SBWallpaperSecureWindow")] && LSRIsWallpaperCapture(self)) LSRPlaceCaptureCopy(window);
+}
 
 // iOS 16's lock screen long press opens the poster (lock screen) editor; on iOS 15 it played the
 // live wallpaper. Replace it with our own press recognizer: play while held, back to the still
 // on release. Presses on notifications and controls (flashlight, camera, ...) are left alone.
-%hook CSCoverSheetViewController
-- (void)viewDidLoad {
-    %orig;
+static void (*LSRWallpaper_orig_CoverSheet_viewDidLoad)(id, SEL);
+static void LSRWallpaper_CoverSheet_viewDidLoad(id self, SEL _cmd) {
+    LSRWallpaper_orig_CoverSheet_viewDidLoad(self, _cmd);
     UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc]
         initWithTarget:[LSRWallpaperPressHandler shared] action:@selector(handlePress:)];
     press.minimumPressDuration = 0.35;
     press.cancelsTouchesInView = NO;
     press.delegate = [LSRWallpaperPressHandler shared];
-    [self.view addGestureRecognizer:press];
+    [[(UIViewController *)self view] addGestureRecognizer:press];
 }
 
 // Lock screen fully up: its design. Starting to go away: the home screen's design underneath.
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
+static void (*LSRWallpaper_orig_CoverSheet_viewDidAppear)(id, SEL, BOOL);
+static void LSRWallpaper_CoverSheet_viewDidAppear(id self, SEL _cmd, BOOL animated) {
+    LSRWallpaper_orig_CoverSheet_viewDidAppear(self, _cmd, animated);
     if (sLSRShowingLockScreen) return;
     sLSRShowingLockScreen = YES;
     if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
     [[NSNotificationCenter defaultCenter] postNotificationName:kLSRShownScreenNotification object:nil];
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
-    %orig;
+static void (*LSRWallpaper_orig_CoverSheet_viewWillDisappear)(id, SEL, BOOL);
+static void LSRWallpaper_CoverSheet_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
+    LSRWallpaper_orig_CoverSheet_viewWillDisappear(self, _cmd, animated);
     if (!sLSRShowingLockScreen) return;
     sLSRShowingLockScreen = NO;
     if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
     [[NSNotificationCenter defaultCenter] postNotificationName:kLSRShownScreenNotification object:nil];
 }
 
-- (void)_setupPosterSwitcherGestureRecognizer {
-}
+static void LSRWallpaper_CoverSheet_setupPosterSwitcherGestureRecognizer(id self, SEL _cmd) {}
+static void LSRWallpaper_CoverSheet_handlePosterSwitcherActivation(id self, SEL _cmd, id sender) {}
 
-- (void)_handlePosterSwitcherActivation:(id)sender {
+static void (*LSRWallpaper_orig_EffectView_layoutSubviews)(id, SEL);
+static void LSRWallpaper_EffectView_layoutSubviews(id self, SEL _cmd) {
+    LSRWallpaper_orig_EffectView_layoutSubviews(self, _cmd);
+    LSRCoverWithStill(self);
 }
-%end
-
-%hook SBWallpaperEffectView
-- (void)layoutSubviews {
-    %orig;
+static void (*LSRWallpaper_orig_EffectView_didMoveToWindow)(id, SEL);
+static void LSRWallpaper_EffectView_didMoveToWindow(id self, SEL _cmd) {
+    LSRWallpaper_orig_EffectView_didMoveToWindow(self, _cmd);
+    LSRCoverWithStill(self);
+}
+static void (*LSRWallpaper_orig_DashboardEffectView_layoutSubviews)(id, SEL);
+static void LSRWallpaper_DashboardEffectView_layoutSubviews(id self, SEL _cmd) {
+    LSRWallpaper_orig_DashboardEffectView_layoutSubviews(self, _cmd);
+    LSRCoverWithStill(self);
+}
+static void (*LSRWallpaper_orig_DashboardEffectView_didMoveToWindow)(id, SEL);
+static void LSRWallpaper_DashboardEffectView_didMoveToWindow(id self, SEL _cmd) {
+    LSRWallpaper_orig_DashboardEffectView_didMoveToWindow(self, _cmd);
     LSRCoverWithStill(self);
 }
 
-- (void)didMoveToWindow {
-    %orig;
-    LSRCoverWithStill(self);
+static void LSRInstallWallpaperHooks(void) {
+    Class cls = objc_getClass("_SBWallpaperSecureWindow");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRWallpaper_SecureWindow_layoutSubviews, (IMP *)&LSRWallpaper_orig_SecureWindow_layoutSubviews);
+    cls = objc_getClass("PBUIBokehWallpaperView");
+    if (cls) {
+        MSHookMessageEx(cls, NSSelectorFromString(@"_screenDidUpdate:"), (IMP)LSRWallpaper_BokehView_screenDidUpdate, (IMP *)&LSRWallpaper_orig_BokehView_screenDidUpdate);
+        MSHookMessageEx(cls, NSSelectorFromString(@"_destroyDisplayLink"), (IMP)LSRWallpaper_BokehView_destroyDisplayLink, (IMP *)&LSRWallpaper_orig_BokehView_destroyDisplayLink);
+    }
+    cls = objc_getClass("PBUIBokehWallpaperCircle");
+    if (cls) MSHookMessageEx(cls, @selector(updatePositionWithTime:dx:dy:lockScreen:), (IMP)LSRWallpaper_BokehCircle_updatePosition, (IMP *)&LSRWallpaper_orig_BokehCircle_updatePosition);
+    cls = objc_getClass("PBUIWallpaperView");
+    if (cls) MSHookMessageEx(cls, NSSelectorFromString(@"_isParallaxMotionEnabled"), (IMP)LSRWallpaper_WallpaperView_isParallaxMotionEnabled, (IMP *)&LSRWallpaper_orig_WallpaperView_isParallaxMotionEnabled);
+    cls = objc_getClass("MTMaterialView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRWallpaper_MaterialView_didMoveToWindow, (IMP *)&LSRWallpaper_orig_MaterialView_didMoveToWindow);
+        MSHookMessageEx(cls, @selector(setGroupName:), (IMP)LSRWallpaper_MaterialView_setGroupName, (IMP *)&LSRWallpaper_orig_MaterialView_setGroupName);
+    }
+    cls = objc_getClass("CSCoverSheetViewController");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(viewDidLoad), (IMP)LSRWallpaper_CoverSheet_viewDidLoad, (IMP *)&LSRWallpaper_orig_CoverSheet_viewDidLoad);
+        MSHookMessageEx(cls, @selector(viewDidAppear:), (IMP)LSRWallpaper_CoverSheet_viewDidAppear, (IMP *)&LSRWallpaper_orig_CoverSheet_viewDidAppear);
+        MSHookMessageEx(cls, @selector(viewWillDisappear:), (IMP)LSRWallpaper_CoverSheet_viewWillDisappear, (IMP *)&LSRWallpaper_orig_CoverSheet_viewWillDisappear);
+        MSHookMessageEx(cls, NSSelectorFromString(@"_setupPosterSwitcherGestureRecognizer"), (IMP)LSRWallpaper_CoverSheet_setupPosterSwitcherGestureRecognizer, NULL);
+        MSHookMessageEx(cls, NSSelectorFromString(@"_handlePosterSwitcherActivation:"), (IMP)LSRWallpaper_CoverSheet_handlePosterSwitcherActivation, NULL);
+    }
+    cls = objc_getClass("SBWallpaperEffectView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRWallpaper_EffectView_layoutSubviews, (IMP *)&LSRWallpaper_orig_EffectView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRWallpaper_EffectView_didMoveToWindow, (IMP *)&LSRWallpaper_orig_EffectView_didMoveToWindow);
+    }
+    cls = objc_getClass("SBDashBoardWallpaperEffectView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRWallpaper_DashboardEffectView_layoutSubviews, (IMP *)&LSRWallpaper_orig_DashboardEffectView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(didMoveToWindow), (IMP)LSRWallpaper_DashboardEffectView_didMoveToWindow, (IMP *)&LSRWallpaper_orig_DashboardEffectView_didMoveToWindow);
+    }
 }
-%end
 
-%hook SBDashBoardWallpaperEffectView
-- (void)layoutSubviews {
-    %orig;
-    LSRCoverWithStill(self);
-}
 
-- (void)didMoveToWindow {
-    %orig;
-    LSRCoverWithStill(self);
-}
-%end
-
-%end // LSRWallpaper
 
 // The home screen's design folder, nil when none was picked (then it shows the lock screen's).
 static NSString *LSRResolveHomeDesignDir(NSDictionary *prefs) {
@@ -2280,77 +2407,77 @@ static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
     }
 }
 
-%group LSRMediaPlayer
+static BOOL (*LSRMediaPlayer_orig_showRouteLabel)(id, SEL);
+static void (*LSRMediaPlayer_orig_updateNowPlayingInfo)(id, SEL);
+static void (*LSRMediaPlayer_orig_didSelectArtworkView)(id, SEL, id);
+static CGSize (*LSRMediaPlayer_orig_sizeThatFits)(id, SEL, CGSize);
+static void (*LSRMediaPlayer_orig_nowPlayingView_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_artworkView_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_headerView_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_headerView_updateVisibility)(id, SEL);
 
-%hook MRUNowPlayingViewController
-- (BOOL)showRouteLabel {
-    if (self.context == kMRUContextCoverSheet) return YES;
-    return %orig;
+static BOOL LSRMediaPlayer_showRouteLabel(id self, SEL _cmd) {
+    if ([self context] == kMRUContextCoverSheet) return YES;
+    return LSRMediaPlayer_orig_showRouteLabel(self, _cmd);
 }
 
-// iOS 16 shows only the artist under the title; iOS 15 showed "Artist — Album".
-- (void)updateNowPlayingInfo {
-    %orig;
-    if (self.context != kMRUContextCoverSheet) return;
+static void LSRMediaPlayer_updateNowPlayingInfo(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_updateNowPlayingInfo(self, _cmd);
+    if ([self context] != kMRUContextCoverSheet) return;
     LSRUpdateAppIcon(self);
-    MRUNowPlayingInfo *info = self.controller.metadataController.nowPlayingInfo;
+    MRUNowPlayingInfo *info = [self controller].metadataController.nowPlayingInfo;
     if (!info.artist.length || !info.album.length) return;
-    UIView *view = self.viewIfLoaded;
+    UIView *view = [self viewIfLoaded];
     if (![view isKindOfClass:NSClassFromString(@"MRUNowPlayingView")]) return;
     MRUNowPlayingLabelView *labelView = ((MRUNowPlayingView *)view).headerView.labelView;
     if (![labelView.subtitle isEqualToString:info.artist]) return;
     labelView.subtitle = [NSString stringWithFormat:@"%@ \u2014 %@", info.artist, info.album];
 }
 
-// Tapping the artwork: iOS 16 asks the lock screen first, which switches to its full-screen
-// album art (iOS 15 had none, and our layout keeps a gap where the artwork was); only if that
-// doesn't take it does it open the playing app. iOS 15 always opened the app.
-- (void)didSelectArtworkView:(id)artworkView {
-    if (self.context != kMRUContextCoverSheet || ![self respondsToSelector:@selector(launchNowPlayingApp)]) {
-        %orig;
+static void LSRMediaPlayer_didSelectArtworkView(id self, SEL _cmd, id artworkView) {
+    if ([self context] != kMRUContextCoverSheet || ![self respondsToSelector:@selector(launchNowPlayingApp)]) {
+        LSRMediaPlayer_orig_didSelectArtworkView(self, _cmd, artworkView);
         return;
     }
     [self launchNowPlayingApp];
 }
-%end
 
-%hook MRUNowPlayingView
-- (CGSize)sizeThatFits:(CGSize)size {
-    CGSize fitting = %orig;
+static CGSize LSRMediaPlayer_sizeThatFits(id self, SEL _cmd, CGSize size) {
+    CGSize fitting = LSRMediaPlayer_orig_sizeThatFits(self, _cmd, size);
     if (!LSRIsLockScreenPlayer(self)) return fitting;
     return CGSizeMake(fitting.width, kIOS15PlayerHeight);
 }
 
-- (void)layoutSubviews {
+static void LSRMediaPlayer_nowPlayingView_layoutSubviews(id self, SEL _cmd) {
     if (LSRIsLockScreenPlayer(self)) LSREnforcePlayerVisibility(self);
-    %orig;
+    LSRMediaPlayer_orig_nowPlayingView_layoutSubviews(self, _cmd);
     if (!LSRIsLockScreenPlayer(self)) return;
 
-    CGFloat width = self.bounds.size.width;
+    MRUNowPlayingView *player = self;
+    CGFloat width = player.bounds.size.width;
     CGFloat inset = kIOS15PlayerInset;
-    LSRSetFrame(self.artworkView, CGRectMake(inset, inset, kIOS15ArtworkSize, kIOS15ArtworkSize));
+    LSRSetFrame(player.artworkView, CGRectMake(inset, inset, kIOS15ArtworkSize, kIOS15ArtworkSize));
     CGFloat headerRight = width - kIOS15RoutingCenterFromRight + 22.0;
-    LSRSetFrame(self.headerView, CGRectMake(kIOS15TextLeft, kIOS15HeaderTop,
+    LSRSetFrame(player.headerView, CGRectMake(kIOS15TextLeft, kIOS15HeaderTop,
         headerRight - kIOS15TextLeft, kIOS15HeaderHeight));
-    LSRSetFrame(self.timeControlsView, CGRectMake(inset, kIOS15TimeBarCenterY - 22.0, width - 2.0 * inset, 44.0));
-    LSRSetFrame(self.transportControlsView, CGRectMake(0, kIOS15TransportCenterY - 22.0, width, 44.0));
-    LSRSetFrame(self.volumeControlsView, CGRectMake(0, kIOS15VolumeCenterY - 22.0, width, 44.0));
-    self.volumeControlsView.alpha = 1.0;
+    LSRSetFrame(player.timeControlsView, CGRectMake(inset, kIOS15TimeBarCenterY - 22.0, width - 2.0 * inset, 44.0));
+    LSRSetFrame(player.transportControlsView, CGRectMake(0, kIOS15TransportCenterY - 22.0, width, 44.0));
+    LSRSetFrame(player.volumeControlsView, CGRectMake(0, kIOS15VolumeCenterY - 22.0, width, 44.0));
+    player.volumeControlsView.alpha = 1.0;
 }
-%end
 
-%hook MRUArtworkView
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_artworkView_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_artworkView_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    for (UIView *view in @[self.artworkImageView ?: [NSNull null], self.artworkShadowView ?: [NSNull null],
-                           self.placeholderBackground ?: [NSNull null]]) {
+    MRUArtworkView *artworkView = self;
+    for (UIView *view in @[artworkView.artworkImageView ?: [NSNull null], artworkView.artworkShadowView ?: [NSNull null],
+                           artworkView.placeholderBackground ?: [NSNull null]]) {
         if (![view isKindOfClass:[UIView class]]) continue;
         if (fabs(view.layer.cornerRadius - kIOS15ArtworkCornerRadius) > 0.01) view.layer.cornerRadius = kIOS15ArtworkCornerRadius;
     }
 
-    UIImageView *iconView = objc_getAssociatedObject(self, kLSRAppIconViewKey);
-    UIImage *icon = [self respondsToSelector:@selector(iconImage)] ? self.iconImage : nil;
+    UIImageView *iconView = objc_getAssociatedObject(artworkView, kLSRAppIconViewKey);
+    UIImage *icon = [artworkView respondsToSelector:@selector(iconImage)] ? artworkView.iconImage : nil;
     if (!iconView && icon) {
         iconView = [UIImageView new];
         iconView.contentMode = UIViewContentModeScaleAspectFill;
@@ -2358,50 +2485,76 @@ static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
         iconView.layer.cornerRadius = round(kIOS15AppIconSize * 0.225 * 3.0) / 3.0;
         iconView.layer.cornerCurve = kCACornerCurveContinuous;
         iconView.accessibilityIgnoresInvertColors = YES;
-        objc_setAssociatedObject(self, kLSRAppIconViewKey, iconView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [self addSubview:iconView];
+        objc_setAssociatedObject(artworkView, kLSRAppIconViewKey, iconView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [artworkView addSubview:iconView];
     }
     if (!iconView) return;
     if (iconView.image != icon) iconView.image = icon;
-    UIImageView *artwork = self.artworkImageView;
+    UIImageView *artwork = artworkView.artworkImageView;
     BOOL showsArtwork = artwork && !artwork.hidden && artwork.image;
     iconView.hidden = !icon || !showsArtwork;
-    CGRect frame = showsArtwork ? artwork.frame : self.bounds;
+    CGRect frame = showsArtwork ? artwork.frame : artworkView.bounds;
     LSRSetFrame(iconView, CGRectMake(CGRectGetMaxX(frame) - kIOS15AppIconSize - kIOS15AppIconInset,
                                      CGRectGetMaxY(frame) - kIOS15AppIconSize - kIOS15AppIconInset,
                                      kIOS15AppIconSize, kIOS15AppIconSize));
-    [self bringSubviewToFront:iconView];
+    [artworkView bringSubviewToFront:iconView];
 }
-%end
 
-// Header: labels on the left, AirPlay on the right, level with the artwork's center.
-%hook MRUNowPlayingHeaderView
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_headerView_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_headerView_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    CGSize size = self.bounds.size;
+    MRUNowPlayingHeaderView *header = self;
+    CGSize size = header.bounds.size;
     CGFloat artworkCenterY = kIOS15PlayerInset + kIOS15ArtworkSize / 2.0 - kIOS15HeaderTop;
-    LSRSetFrame(self.routingButton, CGRectMake(size.width - 44.0, artworkCenterY - 22.0, 44.0, 44.0));
-    LSRSetFrame(self.labelView, CGRectMake(0, 0, size.width - 52.0, size.height));
-    // iOS 16's lock screen layout never shows this button, so nothing fades it in.
-    if (self.routingButton.alpha < 1.0) self.routingButton.alpha = 1.0;
-    // iOS 16's "playing" waveform dots above the AirPlay button.
-    if (!self.waveformView.hidden) self.waveformView.hidden = YES;
+    LSRSetFrame(header.routingButton, CGRectMake(size.width - 44.0, artworkCenterY - 22.0, 44.0, 44.0));
+    LSRSetFrame(header.labelView, CGRectMake(0, 0, size.width - 52.0, size.height));
+    if (header.routingButton.alpha < 1.0) header.routingButton.alpha = 1.0;
+    if (!header.waveformView.hidden) header.waveformView.hidden = YES;
 }
 
-- (void)updateVisibility {
-    %orig;
-    if (LSRLockScreenPlayerFor(self) && self.routingButton.alpha < 1.0) self.routingButton.alpha = 1.0;
+static void LSRMediaPlayer_headerView_updateVisibility(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_headerView_updateVisibility(self, _cmd);
+    MRUNowPlayingHeaderView *header = self;
+    if (LSRLockScreenPlayerFor(header) && header.routingButton.alpha < 1.0) header.routingButton.alpha = 1.0;
 }
-%end
 
-// Three lines: route, title, subtitle.
-%hook MRUNowPlayingLabelView
-- (void)layoutSubviews {
-    %orig;
+static void LSRInstallMediaPlayerFirstHalfHooks(void) {
+    Class cls = objc_getClass("MRUNowPlayingViewController");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(showRouteLabel), (IMP)LSRMediaPlayer_showRouteLabel, (IMP *)&LSRMediaPlayer_orig_showRouteLabel);
+        MSHookMessageEx(cls, @selector(updateNowPlayingInfo), (IMP)LSRMediaPlayer_updateNowPlayingInfo, (IMP *)&LSRMediaPlayer_orig_updateNowPlayingInfo);
+        MSHookMessageEx(cls, @selector(didSelectArtworkView:), (IMP)LSRMediaPlayer_didSelectArtworkView, (IMP *)&LSRMediaPlayer_orig_didSelectArtworkView);
+    }
+    cls = objc_getClass("MRUNowPlayingView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(sizeThatFits:), (IMP)LSRMediaPlayer_sizeThatFits, (IMP *)&LSRMediaPlayer_orig_sizeThatFits);
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_nowPlayingView_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_nowPlayingView_layoutSubviews);
+    }
+    cls = objc_getClass("MRUArtworkView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_artworkView_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_artworkView_layoutSubviews);
+    cls = objc_getClass("MRUNowPlayingHeaderView");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_headerView_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_headerView_layoutSubviews);
+        MSHookMessageEx(cls, @selector(updateVisibility), (IMP)LSRMediaPlayer_headerView_updateVisibility, (IMP *)&LSRMediaPlayer_orig_headerView_updateVisibility);
+    }
+}
+
+// Remaining media-player hooks, installed only alongside the first-half hooks in MediaRemoteUI.
+static void (*LSRMediaPlayer_orig_labelView_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_timeControls_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_transportControls_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_volumeControls_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_slider_layoutSubviews)(id, SEL);
+static void (*LSRMediaPlayer_orig_slider_updateVisualStyling)(id, SEL);
+static void (*LSRMediaPlayer_orig_slider_setValue)(id, SEL, float);
+static void (*LSRMediaPlayer_orig_slider_setValueAnimated)(id, SEL, float, BOOL);
+
+static void LSRMediaPlayer_labelView_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_labelView_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    CGFloat width = self.bounds.size.width;
-    UIView *route = self.routeLabel;
+    MRUNowPlayingLabelView *view = self;
+    CGFloat width = view.bounds.size.width;
+    UIView *route = view.routeLabel;
     if (route) {
         UILabel *label = LSRFirstLabelIn(route);
         CGFloat height = route.bounds.size.height > 0 ? route.bounds.size.height : 13.33;
@@ -2409,57 +2562,51 @@ static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
             MIN(width, MAX(route.bounds.size.width, [route sizeThatFits:CGSizeMake(width, height)].width)), height));
         if (route.alpha < 1.0) route.alpha = 1.0;
     }
-    for (UIView *line in @[self.titleMarqueeView ?: [NSNull null], self.placeholderMarqueeView ?: [NSNull null]]) {
+    for (UIView *line in @[view.titleMarqueeView ?: [NSNull null], view.placeholderMarqueeView ?: [NSNull null]]) {
         if (![line isKindOfClass:[UIView class]]) continue;
         LSRSetFrame(line, CGRectMake(0, LSRTopForBaseline(kIOS15TitleBaseline - kIOS15HeaderTop, LSRFirstLabelIn(line).font),
             width, line.bounds.size.height));
     }
-    UIView *subtitle = self.subtitleMarqueeView;
+    UIView *subtitle = view.subtitleMarqueeView;
     if (subtitle) {
         LSRSetFrame(subtitle, CGRectMake(0, LSRTopForBaseline(kIOS15SubtitleBaseline - kIOS15HeaderTop, LSRFirstLabelIn(subtitle).font),
             width, subtitle.bounds.size.height));
     }
 }
-%end
 
-// Progress bar across the full width, times below it.
-%hook MRUNowPlayingTimeControlsView
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_timeControls_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_timeControls_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    CGSize size = self.bounds.size;
+    MRUNowPlayingTimeControlsView *view = self;
+    CGSize size = view.bounds.size;
     CGFloat barCenterY = size.height / 2.0;
-    LSRSetFrame(self.slider, CGRectMake(0, barCenterY - kIOS15SliderThickness / 2.0, size.width, kIOS15SliderThickness));
+    LSRSetFrame(view.slider, CGRectMake(0, barCenterY - kIOS15SliderThickness / 2.0, size.width, kIOS15SliderThickness));
     CGFloat baseline = barCenterY + (kIOS15TimeLabelBaseline - kIOS15TimeBarCenterY);
-    for (UILabel *label in @[self.elapsedTimeLabel ?: [NSNull null], self.remainingTimeLabel ?: [NSNull null],
-                             self.liveLabel ?: [NSNull null]]) {
+    for (UILabel *label in @[view.elapsedTimeLabel ?: [NSNull null], view.remainingTimeLabel ?: [NSNull null],
+                             view.liveLabel ?: [NSNull null]]) {
         if (![label isKindOfClass:[UILabel class]]) continue;
         if (fabs(label.font.pointSize - kIOS15TimeLabelFontSize) > 0.01) {
             label.font = [label.font fontWithSize:kIOS15TimeLabelFontSize];
         }
         CGSize fit = [label sizeThatFits:CGSizeMake(size.width, CGFLOAT_MAX)];
         CGFloat x = 0;
-        if (label == self.remainingTimeLabel) x = size.width - fit.width;
-        else if (label == self.liveLabel) x = (size.width - fit.width) / 2.0;
+        if (label == view.remainingTimeLabel) x = size.width - fit.width;
+        else if (label == view.liveLabel) x = (size.width - fit.width) / 2.0;
         LSRSetFrame(label, CGRectMake(x, LSRTopForBaseline(baseline, label.font), fit.width, fit.height));
     }
 }
-%end
 
-// Previous, play/pause, next — 98pt apart around the center.
-%hook MRUNowPlayingTransportControlsView
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_transportControls_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_transportControls_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    CGSize size = self.bounds.size;
+    MRUNowPlayingTransportControlsView *view = self;
+    CGSize size = view.bounds.size;
     CGFloat centerX = size.width / 2.0, centerY = size.height / 2.0;
-    // This view spans the platter; iOS 15's spanned the content.
     CGFloat spacing = (size.width - 2.0 * kIOS15PlayerInset + kIOS15TransportSlotWidth) / 4.0;
-    LSRSetCenter(self.leftButton, CGPointMake(centerX - spacing, centerY));
-    LSRSetCenter(self.centerButton, CGPointMake(centerX, centerY));
-    LSRSetCenter(self.rightButton, CGPointMake(centerX + spacing, centerY));
-    // Scales the glyph around the button's center without touching the button's frame.
-    NSArray *buttons = @[self.leftButton ?: [NSNull null], self.centerButton ?: [NSNull null], self.rightButton ?: [NSNull null]];
+    LSRSetCenter(view.leftButton, CGPointMake(centerX - spacing, centerY));
+    LSRSetCenter(view.centerButton, CGPointMake(centerX, centerY));
+    LSRSetCenter(view.rightButton, CGPointMake(centerX + spacing, centerY));
+    NSArray *buttons = @[view.leftButton ?: [NSNull null], view.centerButton ?: [NSNull null], view.rightButton ?: [NSNull null]];
     for (NSUInteger i = 0; i < buttons.count; i++) {
         UIView *button = buttons[i];
         if (![button isKindOfClass:[UIView class]]) continue;
@@ -2468,21 +2615,18 @@ static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
         if (!CATransform3DEqualToTransform(button.layer.sublayerTransform, wanted)) button.layer.sublayerTransform = wanted;
     }
 }
-%end
 
-// Speaker icons at both ends, volume bar between them.
-%hook MRUNowPlayingVolumeControlsView
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_volumeControls_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_volumeControls_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
-    CGSize size = self.bounds.size;
+    MRUNowPlayingVolumeControlsView *view = self;
+    CGSize size = view.bounds.size;
     CGFloat centerY = size.height / 2.0;
-    LSRSetCenter(self.minImageView, CGPointMake(kIOS15VolumeMinIconCenter, centerY));
-    LSRSetCenter(self.maxImageView, CGPointMake(size.width - kIOS15VolumeMaxIconCenterFromRight, centerY));
-    LSRSetFrame(self.slider, CGRectMake(kIOS15VolumeBarLeft, centerY - kIOS15SliderThickness / 2.0,
+    LSRSetCenter(view.minImageView, CGPointMake(kIOS15VolumeMinIconCenter, centerY));
+    LSRSetCenter(view.maxImageView, CGPointMake(size.width - kIOS15VolumeMaxIconCenterFromRight, centerY));
+    LSRSetFrame(view.slider, CGRectMake(kIOS15VolumeBarLeft, centerY - kIOS15SliderThickness / 2.0,
         size.width - kIOS15VolumeBarLeft - kIOS15VolumeBarRightInset, kIOS15SliderThickness));
 }
-%end
 
 // iOS 15's played part of the bar is solid white (iOS 16: half transparent).
 static void LSRBrightenSliderFill(MRUSlider *slider) {
@@ -2490,32 +2634,46 @@ static void LSRBrightenSliderFill(MRUSlider *slider) {
     if (fill && fill.alpha < 1.0) fill.alpha = 1.0;
 }
 
-%hook MRUSlider
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlayer_slider_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_slider_layoutSubviews(self, _cmd);
     if (!LSRLockScreenPlayerFor(self)) return;
     LSRUpdateSliderTouchTarget(self);
     LSRBrightenSliderFill(self);
     LSRUpdateKnob(self);
 }
 
-- (void)updateVisualStyling {
-    %orig;
+static void LSRMediaPlayer_slider_updateVisualStyling(id self, SEL _cmd) {
+    LSRMediaPlayer_orig_slider_updateVisualStyling(self, _cmd);
     if (LSRLockScreenPlayerFor(self)) LSRBrightenSliderFill(self);
 }
 
-- (void)setValue:(float)value {
-    %orig;
+static void LSRMediaPlayer_slider_setValue(id self, SEL _cmd, float value) {
+    LSRMediaPlayer_orig_slider_setValue(self, _cmd, value);
     if (LSRLockScreenPlayerFor(self)) LSRUpdateKnob(self);
 }
 
-- (void)setValue:(float)value animated:(BOOL)animated {
-    %orig;
+static void LSRMediaPlayer_slider_setValueAnimated(id self, SEL _cmd, float value, BOOL animated) {
+    LSRMediaPlayer_orig_slider_setValueAnimated(self, _cmd, value, animated);
     if (LSRLockScreenPlayerFor(self)) LSRUpdateKnob(self);
 }
-%end
 
-%end // LSRMediaPlayer
+static void LSRInstallMediaPlayerRemainingHooks(void) {
+    Class cls = objc_getClass("MRUNowPlayingLabelView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_labelView_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_labelView_layoutSubviews);
+    cls = objc_getClass("MRUNowPlayingTimeControlsView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_timeControls_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_timeControls_layoutSubviews);
+    cls = objc_getClass("MRUNowPlayingTransportControlsView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_transportControls_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_transportControls_layoutSubviews);
+    cls = objc_getClass("MRUNowPlayingVolumeControlsView");
+    if (cls) MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_volumeControls_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_volumeControls_layoutSubviews);
+    cls = objc_getClass("MRUSlider");
+    if (cls) {
+        MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlayer_slider_layoutSubviews, (IMP *)&LSRMediaPlayer_orig_slider_layoutSubviews);
+        MSHookMessageEx(cls, @selector(updateVisualStyling), (IMP)LSRMediaPlayer_slider_updateVisualStyling, (IMP *)&LSRMediaPlayer_orig_slider_updateVisualStyling);
+        MSHookMessageEx(cls, @selector(setValue:), (IMP)LSRMediaPlayer_slider_setValue, (IMP *)&LSRMediaPlayer_orig_slider_setValue);
+        MSHookMessageEx(cls, @selector(setValue:animated:), (IMP)LSRMediaPlayer_slider_setValueAnimated, (IMP *)&LSRMediaPlayer_orig_slider_setValueAnimated);
+    }
+}
 
 // SpringBoard side: the platter around the player (and any other Live Activity) gets 18pt
 // corners; iOS 16 uses 23.5 for the platter, its material
@@ -2533,20 +2691,25 @@ static void LSRRoundActivityPlatter(UIView *view, NSUInteger depth) {
     for (UIView *sub in view.subviews) LSRRoundActivityPlatter(sub, depth + 1);
 }
 
-%group LSRMediaPlatter
+static void (*LSRMediaPlatter_orig_setContinuousCornerRadius)(id, SEL, CGFloat);
+static void (*LSRMediaPlatter_orig_layoutSubviews)(id, SEL);
 
-%hook NCNotificationListSupplementaryHostingView
-- (void)_setContinuousCornerRadius:(CGFloat)radius {
-    %orig(kIOS15PlatterCornerRadius);
+static void LSRMediaPlatter_setContinuousCornerRadius(id self, SEL _cmd, CGFloat radius) {
+    LSRMediaPlatter_orig_setContinuousCornerRadius(self, _cmd, kIOS15PlatterCornerRadius);
 }
 
-- (void)layoutSubviews {
-    %orig;
+static void LSRMediaPlatter_layoutSubviews(id self, SEL _cmd) {
+    LSRMediaPlatter_orig_layoutSubviews(self, _cmd);
     LSRRoundActivityPlatter(self, 0);
 }
-%end
 
-%end // LSRMediaPlatter
+static void LSRInstallMediaPlatterHooks(void) {
+    Class cls = objc_getClass("NCNotificationListSupplementaryHostingView");
+    if (!cls) return;
+    MSHookMessageEx(cls, @selector(_setContinuousCornerRadius:), (IMP)LSRMediaPlatter_setContinuousCornerRadius, (IMP *)&LSRMediaPlatter_orig_setContinuousCornerRadius);
+    MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)LSRMediaPlatter_layoutSubviews, (IMP *)&LSRMediaPlatter_orig_layoutSubviews);
+}
+
 
 #pragma mark - Unlock animation
 
@@ -2633,17 +2796,16 @@ static void LSRApplyIOS15Transitions(id settings) {
     }
 }
 
-%group LSRUnlock
-
-%hook CSCoverSheetTransitionsSettings
-- (void)setDefaultValues {
-    %orig;
+static void (*LSRUnlock_orig_setDefaultValues)(id, SEL);
+static void LSRUnlock_setDefaultValues(id self, SEL _cmd) {
+    LSRUnlock_orig_setDefaultValues(self, _cmd);
     LSRApplyIOS15Transitions(self);
 }
 
-%end
-
-%end // LSRUnlock
+static void LSRInstallUnlockHooks(void) {
+    Class cls = objc_getClass("CSCoverSheetTransitionsSettings");
+    if (cls) MSHookMessageEx(cls, @selector(setDefaultValues), (IMP)LSRUnlock_setDefaultValues, (IMP *)&LSRUnlock_orig_setDefaultValues);
+}
 
 #pragma mark - Icon label shadows (iOS 15)
 
@@ -2716,20 +2878,20 @@ static UIImage *LSRIOS15LabelShadow(UIView *shadowView) {
     return shadow;
 }
 
-%group LSRIconLabels
-
-%hook SBUILegibilityShadowView
-- (void)setImage:(UIImage *)image strengthenedImage:(UIImage *)strengthenedImage strength:(double)strength {
+static void (*LSRIconLabels_orig_setImage)(id, SEL, UIImage *, UIImage *, double);
+static void LSRIconLabels_setImage(id self, SEL _cmd, UIImage *image, UIImage *strengthenedImage, double strength) {
     UIImage *ios15 = image ? LSRIOS15LabelShadow(self) : nil;
     if (ios15) {
-        %orig(ios15, ios15, strength);
+        LSRIconLabels_orig_setImage(self, _cmd, ios15, ios15, strength);
         return;
     }
-    %orig;
+    LSRIconLabels_orig_setImage(self, _cmd, image, strengthenedImage, strength);
 }
-%end
 
-%end // LSRIconLabels
+static void LSRInstallIconLabelHooks(void) {
+    Class cls = objc_getClass("SBUILegibilityShadowView");
+    if (cls) MSHookMessageEx(cls, @selector(setImage:strengthenedImage:strength:), (IMP)LSRIconLabels_setImage, (IMP *)&LSRIconLabels_orig_setImage);
+}
 
 #pragma mark - Settings
 
@@ -2739,7 +2901,9 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     return value ? [value boolValue] : YES;
 }
 
-%ctor {
+__attribute__((constructor)) static void LSRInitialize(void) {
+    os_log_t lsrLogger = os_log_create("com.aronsz26.lockscreenrestore", "runtime");
+    os_log(lsrLogger, "ApelinLoaded %{public}s", APELIN_BUILD_ID);
     NSDictionary *prefs = nil;
     for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
         prefs = [NSDictionary dictionaryWithContentsOfFile:LSRDevicePath(kLSRPrefsPaths[i])];
@@ -2749,7 +2913,10 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     NSString *process = [NSProcessInfo processInfo].processName;
     if ([process isEqualToString:@"MediaRemoteUI"]) {
         LSRDebugLog(@"MediaRemoteUI prefs readable: %d", prefs != nil);
-        if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlayer);
+        if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) {
+            LSRInstallMediaPlayerFirstHalfHooks();
+            LSRInstallMediaPlayerRemainingHooks();
+        }
         return;
     }
     if (![process isEqualToString:@"SpringBoard"]) return;
@@ -2757,7 +2924,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     id clockSize = prefs[@"clockSize"];
     if ([clockSize isKindOfClass:[NSNumber class]]) sLSRClockSizeFactor = MIN(MAX([clockSize doubleValue], 0.7), 1.5);
     if (sLSRClockEnabled) {
-        %init(LSRClock);
+        LSRInstallClockHooks();
         // Text Size changed in Settings: the date gets its new size right away.
         [[NSNotificationCenter defaultCenter] addObserverForName:UIContentSizeCategoryDidChangeNotification object:nil
             queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
@@ -2768,11 +2935,11 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
             [view.superview setNeedsLayout];
         }];
     }
-    if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
-    if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
-    if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
-    if (LSRPrefEnabled(prefs, @"unlockAnimationEnabled") && NSClassFromString(@"CSCoverSheetTransitionsSettings")) %init(LSRUnlock);
-    if (LSRPrefEnabled(prefs, @"iconLabelShadowEnabled") && NSClassFromString(@"SBUILegibilityShadowView")) %init(LSRIconLabels);
+    if (LSRPrefEnabled(prefs, @"focusEnabled")) LSRInstallFocusHooks();
+    if (LSRPrefEnabled(prefs, @"notificationsEnabled")) LSRInstallNotificationHooks();
+    if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) LSRInstallMediaPlatterHooks();
+    if (LSRPrefEnabled(prefs, @"unlockAnimationEnabled") && NSClassFromString(@"CSCoverSheetTransitionsSettings")) LSRInstallUnlockHooks();
+    if (LSRPrefEnabled(prefs, @"iconLabelShadowEnabled") && NSClassFromString(@"SBUILegibilityShadowView")) LSRInstallIconLabelHooks();
     if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
@@ -2780,7 +2947,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
         sLSRPerspectiveZoom = prefs[@"perspectiveZoom"] ? [prefs[@"perspectiveZoom"] boolValue] : YES;
         // Also without any wallpaper yet: one picked in Settings > Wallpaper (a design or a
         // photo) then shows right away. Until then our views have no image and stay see-through.
-        %init(LSRWallpaper);
+        LSRInstallWallpaperHooks();
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
             LSRWallpaperPrefsChanged, CFSTR("com.aronsz26.lockscreenrestore/wallpaper"), NULL,
             CFNotificationSuspensionBehaviorDeliverImmediately);
