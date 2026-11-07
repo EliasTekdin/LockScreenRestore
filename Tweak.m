@@ -293,8 +293,10 @@ static UIView *LSRFindSubview(UIView *root, Class cls) {
 
 static BOOL LSRHasDynamicIslandLayout(void) {
     CGSize screen = [UIScreen mainScreen].bounds.size;
+    // iPhone 15 Pro Max reports a 430 × 932pt screen, not 950pt high. The old
+    // 950pt cutoff missed it, so the lock fell back to the oversized legacy scale.
     return [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone
-        && MAX(screen.width, screen.height) >= 950.0
+        && MAX(screen.width, screen.height) >= 900.0
         && MIN(screen.width, screen.height) >= 430.0;
 }
 
