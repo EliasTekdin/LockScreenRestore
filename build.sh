@@ -44,6 +44,8 @@ clang -dynamiclib -arch "$arch" -fobjc-arc -fblocks -fvisibility=hidden \
     -o "$stage/Library/MobileSubstrate/DynamicLibraries/LockScreenRestore.dylib"
 ldid -S "$stage/Library/MobileSubstrate/DynamicLibraries/LockScreenRestore.dylib"
 cp LockScreenRestore.plist "$stage/Library/MobileSubstrate/DynamicLibraries/LockScreenRestore.plist"
+ln -s ../../../usr/lib/DynamicPatches/AutoPatches.dylib \
+    "$stage/Library/MobileSubstrate/DynamicLibraries/LockScreenRestore.dylib.roothidepatch"
 
 prefs_bundle="$stage/Library/PreferenceBundles/LockScreenRestorePrefs.bundle"
 clang -bundle -arch "$arch" -fobjc-arc -fblocks -fvisibility=hidden \

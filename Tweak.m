@@ -32,6 +32,9 @@ static NSString *const kLSRPrefsPaths[] = {
     @"/var/mobile/Library/Preferences/com.aronsz26.lockscreenrestore.plist",
 };
 static BOOL sLSRClockEnabled = YES;
+// The notification list's vertical movement is applied to the Dynamic Island lock glyph so it
+// travels with the list rather than remaining pinned to the status area.
+static CGFloat sLSRNotificationScrollDisplacement = 0.0;
 
 // Debug builds log to LockScreenRestoreDebug.log.
 #ifdef DEBUG
@@ -286,6 +289,23 @@ static UIView *LSRFindSubview(UIView *root, Class cls) {
         if (found) return found;
     }
     return nil;
+}
+
+static BOOL LSRHasDynamicIslandLayout(void) {
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    return [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone
+        && MAX(screen.width, screen.height) >= 950.0
+        && MIN(screen.width, screen.height) >= 430.0;
+}
+
+static void LSRUpdateLockScrollPosition(UIScrollView *list) {
+    if (!LSRHasDynamicIslandLayout()) return;
+    Class listClass = NSClassFromString(@"NCNotificationListView");
+    if (!list || (list.superview && [list.superview isKindOfClass:listClass])) return;
+
+    sLSRNotificationScrollDisplacement = list.contentOffset.y + list.adjustedContentInset.top;
+    UIView *lockView = LSRFindSubview(list.window, NSClassFromString(@"SBUIProudLockIconView"));
+    [lockView setNeedsLayout];
 }
 
 #pragma mark - Group: iOS 15 clock (padlock, time, date, colors, no depth effect)
@@ -567,15 +587,16 @@ static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd) {
     UIView *glyph = LSRFindSubview(lockView, NSClassFromString(@"BSUICAPackageView"));
     if (!glyph) return;
     LSRLayout layout = LSRCurrentLayout();
-    CGSize screen = [UIScreen mainScreen].bounds.size;
-    BOOL phone = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
-    BOOL dynamicIslandFaceID = phone && MAX(screen.width, screen.height) >= 950.0 && MIN(screen.width, screen.height) >= 430.0;
+    BOOL dynamicIslandFaceID = LSRHasDynamicIslandLayout();
     CGFloat scale = dynamicIslandFaceID ? 1.0 : layout.padlockScale;
     CGFloat tx = 0.0;
     CGFloat ty = layout.padlockDrop;
     if (dynamicIslandFaceID && glyph.superview && lockView.window) {
         UIWindow *window = lockView.window;
-        CGPoint targetInWindow = CGPointMake(CGRectGetMidX(window.bounds), kIOS15FaceIDPadlockCenter);
+        CGFloat safeTop = window.safeAreaInsets.top;
+        CGFloat targetY = (safeTop > 0.0 ? safeTop + 8.0 : kIOS15FaceIDPadlockCenter)
+            - sLSRNotificationScrollDisplacement;
+        CGPoint targetInWindow = CGPointMake(CGRectGetMidX(window.bounds), targetY);
         CGPoint targetInSuperview = [glyph.superview convertPoint:targetInWindow fromView:window];
         CGPoint delta = CGPointMake(targetInSuperview.x - glyph.center.x, targetInSuperview.y - glyph.center.y);
         tx = delta.x;
@@ -1000,7 +1021,9 @@ static void LSRNotifications_NCNotificationListView_setContentOffset(id self, SE
 static IMP LSRNotifications_orig_NCNotificationListView_setContentOffset;
 static void LSRNotifications_NCNotificationListView_setContentOffset(id self, SEL _cmd, CGPoint offset) {
     ((void (*)(id, SEL, CGPoint))LSRNotifications_orig_NCNotificationListView_setContentOffset)(self, _cmd, offset);
-    LSRHoldListAtTop((NCNotificationListView *)self);
+    NCNotificationListView *list = (NCNotificationListView *)self;
+    LSRHoldListAtTop(list);
+    LSRUpdateLockScrollPosition(list);
 }
 static void LSRNotifications_NCNotificationListView_setRevealPercentage(id self, SEL _cmd, CGFloat percentage);
 static IMP LSRNotifications_orig_NCNotificationListView_setRevealPercentage;
