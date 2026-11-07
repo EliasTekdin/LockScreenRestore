@@ -598,9 +598,8 @@ static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd) {
     LSRLayout layout = LSRCurrentLayout();
     BOOL dynamicIslandFaceID = LSRHasDynamicIslandLayout();
     CGFloat scale = dynamicIslandFaceID ? 1.0 : layout.padlockScale;
-    CGFloat tx = 0.0;
-    CGFloat ty = layout.padlockDrop;
-    if (dynamicIslandFaceID && glyph.superview && lockView.window) {
+    CGFloat ty = dynamicIslandFaceID ? 0.0 : layout.padlockDrop;
+    if (dynamicIslandFaceID && lockView.superview && lockView.window) {
         UIWindow *window = lockView.window;
         CGFloat safeTop = window.safeAreaInsets.top > 0.0 ? window.safeAreaInsets.top : 56.0;
         CGFloat minY = safeTop + 6.0;
@@ -609,12 +608,12 @@ static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd) {
         CGFloat maxY = MAX(restingY, clockDigitsTop - 12.0);
         CGFloat targetY = MIN(maxY, MAX(minY, restingY - sLSRNotificationScrollDisplacement));
         CGPoint targetInWindow = CGPointMake(CGRectGetMidX(window.bounds), targetY);
-        CGPoint targetInSuperview = [glyph.superview convertPoint:targetInWindow fromView:window];
-        CGPoint delta = CGPointMake(targetInSuperview.x - glyph.center.x, targetInSuperview.y - glyph.center.y);
-        tx = delta.x;
-        ty = delta.y;
+        CGPoint targetCenter = [lockView.superview convertPoint:targetInWindow fromView:window];
+        if (fabs(lockView.center.x - targetCenter.x) > 0.25 || fabs(lockView.center.y - targetCenter.y) > 0.25) {
+            lockView.center = targetCenter;
+        }
     }
-    CGAffineTransform t = CGAffineTransformMake(scale, 0, 0, scale, tx, ty);
+    CGAffineTransform t = CGAffineTransformMake(scale, 0, 0, scale, 0, ty);
     if (!CGAffineTransformEqualToTransform(glyph.transform, t)) glyph.transform = t;
 }
 
