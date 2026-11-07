@@ -35,6 +35,8 @@ static BOOL sLSRClockEnabled = YES;
 // The notification list's vertical movement is applied to the Dynamic Island lock glyph so it
 // travels with the list rather than remaining pinned to the status area.
 static CGFloat sLSRNotificationScrollDisplacement = 0.0;
+static __weak UIScrollView *sLSRNotificationScrollBaselineList = nil;
+static CGFloat sLSRNotificationScrollBaseline = 0.0;
 
 // Debug builds log to LockScreenRestoreDebug.log.
 #ifdef DEBUG
@@ -305,7 +307,12 @@ static void LSRUpdateLockScrollPosition(UIScrollView *list) {
     Class listClass = NSClassFromString(@"NCNotificationListView");
     if (!list || (list.superview && [list.superview isKindOfClass:listClass])) return;
 
-    sLSRNotificationScrollDisplacement = list.contentOffset.y + list.adjustedContentInset.top;
+    CGFloat normalizedOffset = list.contentOffset.y + list.adjustedContentInset.top;
+    if (sLSRNotificationScrollBaselineList != list) {
+        sLSRNotificationScrollBaselineList = list;
+        sLSRNotificationScrollBaseline = normalizedOffset;
+    }
+    sLSRNotificationScrollDisplacement = normalizedOffset - sLSRNotificationScrollBaseline;
     UIView *lockView = LSRFindSubview(list.window, NSClassFromString(@"SBUIProudLockIconView"));
     [lockView setNeedsLayout];
 }
@@ -595,9 +602,12 @@ static void LSRClock_SBUIProudLockIconView_layoutSubviews(id self, SEL _cmd) {
     CGFloat ty = layout.padlockDrop;
     if (dynamicIslandFaceID && glyph.superview && lockView.window) {
         UIWindow *window = lockView.window;
-        CGFloat safeTop = window.safeAreaInsets.top;
-        CGFloat targetY = (safeTop > 0.0 ? safeTop + 8.0 : kIOS15FaceIDPadlockCenter)
-            - sLSRNotificationScrollDisplacement;
+        CGFloat safeTop = window.safeAreaInsets.top > 0.0 ? window.safeAreaInsets.top : 56.0;
+        CGFloat minY = safeTop + 6.0;
+        CGFloat restingY = safeTop + 20.0;
+        CGFloat clockDigitsTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
+        CGFloat maxY = MAX(restingY, clockDigitsTop - 12.0);
+        CGFloat targetY = MIN(maxY, MAX(minY, restingY - sLSRNotificationScrollDisplacement));
         CGPoint targetInWindow = CGPointMake(CGRectGetMidX(window.bounds), targetY);
         CGPoint targetInSuperview = [glyph.superview convertPoint:targetInWindow fromView:window];
         CGPoint delta = CGPointMake(targetInSuperview.x - glyph.center.x, targetInSuperview.y - glyph.center.y);
